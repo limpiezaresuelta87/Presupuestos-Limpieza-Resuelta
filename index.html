@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Generador de Presupuestos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="marca">
+    <span class="marca-icono">▣</span>
+    <span class="marca-texto">Presupuestos</span>
+  </div>
+  <nav class="tabs">
+    <button class="tab-btn activo" data-tab="nuevo">Nuevo presupuesto</button>
+    <button class="tab-btn" data-tab="historial">Historial</button>
+    <button class="tab-btn" data-tab="lista-precios">Lista de precios</button>
+    <button class="tab-btn" data-tab="configuracion">Configuración</button>
+    <a class="tab-btn" href="informes.html">Informes</a>
+  </nav>
+</header>
+
+<main class="app-main">
+
+  <!-- ================= NUEVO PRESUPUESTO ================= -->
+  <section id="panel-nuevo" class="tab-panel activo">
+
+    <div id="banner-edicion" class="lp-info" style="display:none;">
+      <div>
+        <span class="lp-label">Editando</span>
+        <span id="banner-edicion-texto">—</span>
+      </div>
+      <div style="justify-content:center;">
+        <button type="button" class="btn btn-secundario" id="btn-cancelar-edicion">Cancelar edición</button>
+      </div>
+    </div>
+
+    <div class="grid-nuevo">
+
+      <div class="tarjeta">
+        <h2>Cliente</h2>
+        <div class="campo">
+          <label for="input-cliente-nombre">Nombre / Razón social</label>
+          <input type="text" id="input-cliente-nombre" placeholder="Ej: Ferretería del Centro" />
+        </div>
+        <div class="campo">
+          <label for="input-cliente-contacto">Contacto (opcional)</label>
+          <input type="text" id="input-cliente-contacto" placeholder="Teléfono, email o dirección" />
+        </div>
+      </div>
+
+      <div class="tarjeta">
+        <h2>Agregar productos</h2>
+        <div class="buscador-wrap">
+          <input
+            type="text"
+            id="buscador-producto"
+            placeholder="Escribí para buscar un artículo…"
+            autocomplete="off"
+          />
+          <ul id="resultados-busqueda" class="resultados-busqueda"></ul>
+        </div>
+
+        <div id="panel-agregar-rapido" class="panel-agregar-rapido" style="display:none;">
+          <div class="rapido-nombre" id="rapido-nombre"></div>
+          <div class="rapido-fila">
+            <label for="rapido-cantidad">Cantidad</label>
+            <input type="number" id="rapido-cantidad" min="1" value="1" />
+            <button type="button" class="btn btn-primario" id="btn-rapido-agregar">Agregar</button>
+            <button type="button" class="btn-icono" id="btn-rapido-cancelar" title="Cancelar">✕</button>
+          </div>
+          <div class="rapido-preview" id="rapido-preview"></div>
+        </div>
+
+        <button type="button" class="btn-mini" id="btn-toggle-manual" style="margin-top:12px;">
+          + Agregar artículo que no está en la lista
+        </button>
+        <div id="form-manual" class="fila-config-presupuesto" style="display:none;">
+          <div class="campo campo-flex">
+            <label for="manual-nombre">Nombre del artículo</label>
+            <input type="text" id="manual-nombre" placeholder="Ej: Pedido especial del cliente" />
+          </div>
+          <div class="campo campo-chico">
+            <label for="manual-cantidad">Cantidad</label>
+            <input type="number" id="manual-cantidad" min="1" value="1" />
+          </div>
+          <div class="campo campo-chico">
+            <label for="manual-precio">Precio unitario</label>
+            <input type="number" id="manual-precio" min="0" step="0.01" value="0" />
+          </div>
+          <div class="campo campo-chico">
+            <button type="button" class="btn btn-primario" id="btn-agregar-manual">Agregar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tarjeta tarjeta-ancha">
+        <h2>Presupuesto</h2>
+        <div class="tabla-wrap">
+          <table id="tabla-carrito">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Tipo de precio</th>
+                <th>Precio aplicado</th>
+                <th>Subtotal</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="fila-config-presupuesto">
+          <div class="campo campo-chico">
+            <label for="input-descuento">Descuento (%)</label>
+            <input type="number" id="input-descuento" min="0" max="100" value="0" />
+          </div>
+          <div class="campo campo-chico">
+            <label for="input-validez">Validez (días)</label>
+            <input type="number" id="input-validez" min="1" value="15" />
+          </div>
+          <div class="campo campo-flex">
+            <label for="input-condiciones">Condiciones de pago</label>
+            <input type="text" id="input-condiciones" placeholder="Ej: Contado / Transferencia" />
+          </div>
+        </div>
+
+        <div class="campo">
+          <label for="input-observaciones">Observaciones</label>
+          <textarea id="input-observaciones" rows="2" placeholder="Notas adicionales para el cliente…"></textarea>
+        </div>
+
+        <div class="totales">
+          <div class="totales-linea"><span>Subtotal</span><span id="total-subtotal">$ 0,00</span></div>
+          <div class="totales-linea"><span>Descuento</span><span id="total-descuento">- $ 0,00</span></div>
+          <div class="totales-linea totales-final"><span>Total</span><span id="total-final">$ 0,00</span></div>
+        </div>
+
+        <div class="acciones-presupuesto">
+          <button class="btn btn-secundario" id="btn-vista-previa">Vista previa PDF</button>
+          <button class="btn btn-secundario" id="btn-guardar-presupuesto">Guardar presupuesto</button>
+          <button class="btn btn-primario" id="btn-descargar-pdf">Guardar y descargar PDF</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= HISTORIAL ================= -->
+  <section id="panel-historial" class="tab-panel">
+    <div class="tarjeta tarjeta-ancha">
+      <div class="historial-cabecera-tarjeta">
+        <h2 id="historial-titulo">Historial de presupuestos</h2>
+        <div class="historial-herramientas">
+          <button class="btn btn-secundario" id="btn-toggle-papelera">Papelera (0)</button>
+          <button class="btn btn-secundario" id="btn-exportar-historial">Exportar historial</button>
+          <button class="btn btn-secundario" id="btn-importar-historial">Importar historial</button>
+          <input type="file" id="input-importar-historial" accept=".json" hidden />
+        </div>
+      </div>
+      <p class="texto-ayuda">
+        Usá esto para juntar en un mismo lugar los presupuestos generados en distintos
+        dispositivos (por ejemplo PC y celular). Exportá el historial en el dispositivo
+        que quieras copiar, mandate ese archivo (WhatsApp, mail, etc.) y en el otro
+        dispositivo importalo: solo agrega los que falten, nunca duplica ni pisa los que ya tenés.
+      </p>
+      <div class="tabla-wrap">
+        <table id="tabla-historial">
+          <thead>
+            <tr>
+              <th>N°</th>
+              <th>Fecha</th>
+              <th>Cliente</th>
+              <th>Ítems</th>
+              <th>Total</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="detalle-historial" class="detalle-historial">
+      <div class="detalle-cabecera">
+        <div>
+          <h3>Presupuesto <span id="detalle-numero"></span></h3>
+          <p class="detalle-meta">
+            <span id="detalle-fecha"></span> · Cliente: <span id="detalle-cliente"></span>
+          </p>
+          <p class="detalle-meta">Precios congelados al: <span id="detalle-lista-fecha"></span></p>
+        </div>
+        <button class="btn-icono" id="btn-detalle-cerrar" title="Cerrar">✕</button>
+      </div>
+
+      <div class="tabla-wrap">
+        <table id="detalle-tabla">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Cantidad</th>
+              <th>Tipo</th>
+              <th>Precio aplicado</th>
+              <th>Subtotal</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="detalle-total">Total: <strong id="detalle-total"></strong></div>
+
+      <div class="acciones-presupuesto">
+        <button class="btn btn-secundario" id="btn-detalle-editar">Editar</button>
+        <button class="btn btn-secundario" id="btn-recalcular">Recalcular con lista vigente</button>
+        <button class="btn btn-primario" id="btn-detalle-pdf">Descargar / reimprimir PDF</button>
+        <button class="btn btn-mini-peligro" id="btn-detalle-eliminar">Eliminar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= LISTA DE PRECIOS ================= -->
+  <section id="panel-lista-precios" class="tab-panel">
+    <div class="tarjeta tarjeta-ancha">
+      <h2>Lista de precios vigente</h2>
+      <div class="lp-info">
+        <div><span class="lp-label">Origen</span><span id="lp-origen">—</span></div>
+        <div><span class="lp-label">Actualizada</span><span id="lp-fecha">—</span></div>
+        <div><span class="lp-label">Artículos cargados</span><span id="lp-cantidad">0</span></div>
+      </div>
+      <p class="texto-ayuda" id="lp-costos-info">
+        Historial de costos (para Informes): sin datos todavía.
+      </p>
+
+      <h3>Actualizar desde Excel</h3>
+      <p class="texto-ayuda">
+        Subí la última versión de tu Excel de precios. La app lee la hoja principal de venta
+        (columnas Producto, Precio Unitario, Precio Pack y Cantidad de Pack), la guarda en este
+        navegador y la usa para todo presupuesto nuevo. <strong>El Excel original nunca se modifica.</strong>
+      </p>
+      <div id="lp-dropzone" class="dropzone">
+        <p>Arrastrá el archivo .xlsx acá, o tocá para elegirlo</p>
+        <button type="button" class="btn btn-primario" id="btn-elegir-archivo-lista">Agregar archivo del dispositivo</button>
+        <input type="file" id="lp-archivo" accept=".xlsx,.xls" hidden />
+      </div>
+      <p id="lp-estado" class="texto-estado"></p>
+    </div>
+  </section>
+
+  <!-- ================= CONFIGURACIÓN ================= -->
+  <section id="panel-configuracion" class="tab-panel">
+    <div class="tarjeta tarjeta-ancha">
+      <h2>Datos de la empresa</h2>
+      <div class="grid-config">
+        <div class="campo">
+          <label for="cfg-nombre">Nombre / Razón social</label>
+          <input type="text" id="cfg-nombre" />
+        </div>
+        <div class="campo">
+          <label for="cfg-cuit">CUIT</label>
+          <input type="text" id="cfg-cuit" />
+        </div>
+        <div class="campo">
+          <label for="cfg-direccion">Dirección</label>
+          <input type="text" id="cfg-direccion" />
+        </div>
+        <div class="campo">
+          <label for="cfg-telefono">Teléfono</label>
+          <input type="text" id="cfg-telefono" />
+        </div>
+        <div class="campo">
+          <label for="cfg-email">Email</label>
+          <input type="email" id="cfg-email" />
+        </div>
+        <div class="campo">
+          <label for="cfg-logo">Logo (PNG/JPG)</label>
+          <input type="file" id="cfg-logo" accept="image/png,image/jpeg" />
+          <img id="cfg-logo-preview" class="logo-preview" alt="Logo" />
+        </div>
+      </div>
+
+      <h2>Valores por defecto</h2>
+      <div class="grid-config">
+        <div class="campo">
+          <label for="cfg-validez">Validez por defecto (días)</label>
+          <input type="number" id="cfg-validez" min="1" />
+        </div>
+        <div class="campo campo-flex">
+          <label for="cfg-condiciones">Condiciones de pago por defecto</label>
+          <input type="text" id="cfg-condiciones" />
+        </div>
+      </div>
+
+      <h2>Numeración de presupuestos</h2>
+      <p class="texto-ayuda">
+        Si esta app se usa en más de una PC, ponele a cada una un prefijo distinto
+        (ej: <strong>CASA-</strong>, <strong>LOCAL-</strong>, <strong>DEPOSITO-</strong>). Así los números
+        nunca se repiten entre máquinas y podés juntar los historiales de todas sin
+        que se pisen ni se pierdan presupuestos.
+      </p>
+      <div class="grid-config">
+        <div class="campo">
+          <label for="cfg-prefijo">Prefijo</label>
+          <input type="text" id="cfg-prefijo" />
+        </div>
+        <div class="campo">
+          <label for="cfg-siguiente-numero">Próximo número</label>
+          <input type="number" id="cfg-siguiente-numero" min="1" />
+        </div>
+      </div>
+
+      <div class="acciones-presupuesto">
+        <button class="btn btn-primario" id="btn-guardar-configuracion">Guardar configuración</button>
+      </div>
+
+      <h2>Copia de seguridad completa</h2>
+      <p class="texto-ayuda">
+        Guarda en un solo archivo el historial, la configuración y la lista de precios vigente.
+        Usala como red de seguridad: si en algún momento abrís la app desde otra carpeta o
+        computadora y ves el historial vacío, no se borró nada — Chrome guarda los datos
+        "por carpeta" cuando abrís un archivo local con doble clic, así que una copia en otra
+        ubicación cuenta como si fuera otro sitio distinto. Importando este archivo ahí, recuperás todo.
+      </p>
+      <div class="acciones-presupuesto" style="justify-content:flex-start;">
+        <button class="btn btn-secundario" id="btn-exportar-todo">Exportar copia completa</button>
+        <button class="btn btn-secundario" id="btn-importar-todo">Importar copia completa</button>
+        <input type="file" id="input-importar-todo" accept=".json" hidden />
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast"></div>
+
+<!-- Librerías gratuitas (MIT/Apache) por CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<!-- Módulos propios de la app. Son scripts normales (no type="module") a
+     propósito, para que funcionen abriendo index.html con doble clic,
+     sin necesidad de servidor local. -->
+<script src="js/data-precios-iniciales.js"></script>
+<script src="js/store.js"></script>
+<script src="js/pricelist.js"></script>
+<script src="js/quote.js"></script>
+<script src="js/pdf.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Informes — Presupuestos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/styles.css" />
+<link rel="stylesheet" href="css/informes.css" />
+
+<!-- PWA: hace que la app sea instalable y funcione sin conexión -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#1f2937" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="marca">
+    <span class="marca-icono">▣</span>
+    <span class="marca-texto">Presupuestos</span>
+  </div>
+  <nav class="tabs">
+    <a class="tab-btn" href="index.html">Nuevo presupuesto</a>
+    <a class="tab-btn" href="index.html">Historial</a>
+    <a class="tab-btn" href="index.html">Lista de precios</a>
+    <a class="tab-btn" href="index.html">Configuración</a>
+    <button class="tab-btn activo" data-tab="informes">Informes</button>
+  </nav>
+</header>
+
+<main class="app-main">
+
+  <div class="tarjeta tarjeta-ancha">
+    <h2>Filtros</h2>
+    <p class="texto-ayuda">
+      Los informes toman los presupuestos guardados como ventas concretadas. Si un
+      presupuesto fue corregido (tiene revisiones -R1, -R2…), solo se cuenta la
+      última versión; los que están en la papelera no se incluyen.
+    </p>
+    <div class="fila-config-presupuesto">
+      <div class="campo campo-chico" style="width:180px;">
+        <label for="filtro-mes">Mes</label>
+        <select id="filtro-mes"><option value="">Todos</option></select>
+      </div>
+      <div class="campo campo-flex">
+        <label for="filtro-cliente">Cliente</label>
+        <select id="filtro-cliente"><option value="">Todos</option></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-kpis">
+    <div class="tarjeta kpi">
+      <span class="kpi-label">Presupuestos</span>
+      <span class="kpi-valor" id="kpi-cantidad">0</span>
+    </div>
+    <div class="tarjeta kpi">
+      <span class="kpi-label">Total facturado</span>
+      <span class="kpi-valor" id="kpi-total">$ 0,00</span>
+    </div>
+    <div class="tarjeta kpi">
+      <span class="kpi-label">Ganancia estimada</span>
+      <span class="kpi-valor" id="kpi-ganancia">$ 0,00</span>
+    </div>
+    <div class="tarjeta kpi">
+      <span class="kpi-label">Margen estimado</span>
+      <span class="kpi-valor" id="kpi-margen">—</span>
+    </div>
+  </div>
+  <p class="texto-ayuda" id="ganancia-nota"></p>
+
+  <div class="grid-informes">
+
+    <div class="tarjeta">
+      <h2>Ventas por mes</h2>
+      <div id="chart-ventas-mes" class="chart-barras"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Artículos más vendidos</h2>
+      <div class="tabla-wrap">
+        <table id="tabla-top-articulos">
+          <thead><tr><th>Artículo</th><th>Cant.</th><th>Total</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Ranking de clientes</h2>
+      <div class="tabla-wrap">
+        <table id="tabla-ranking-clientes">
+          <thead><tr><th>Cliente</th><th>Presup.</th><th>Total</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Ganancia por artículo</h2>
+      <p class="texto-ayuda">
+        Compara el precio aplicado en cada presupuesto contra el costo del snapshot
+        mensual más cercano a esa fecha. Los artículos manuales o sin costo cargado
+        se muestran aparte.
+      </p>
+      <div class="tabla-wrap">
+        <table id="tabla-ganancia-articulos">
+          <thead><tr><th>Artículo</th><th>Cant.</th><th>Venta</th><th>Costo</th><th>Ganancia</th><th>Margen</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tarjeta tarjeta-ancha">
+      <h2>Evolución de costo y precio por artículo</h2>
+      <div class="campo campo-flex" style="max-width:420px;">
+        <label for="filtro-articulo-evolucion">Elegí un artículo</label>
+        <select id="filtro-articulo-evolucion"><option value="">— Seleccionar —</option></select>
+      </div>
+      <div class="tabla-wrap">
+        <table id="tabla-evolucion">
+          <thead><tr><th>Mes</th><th>Costo unitario</th><th>Precio venta promedio</th><th>Margen</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<!-- Firebase (versión "compat", por CDN, sin npm ni build tools) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-init.js"></script>
+
+<script src="js/store.js"></script>
+<script src="js/quote.js"></script>
+<script src="js/informes.js"></script>
+
+<script>
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js')
+        .catch((err) => console.warn('No se pudo registrar el service worker:', err));
+    });
+  }
+</script>
+</body>
+</html>
