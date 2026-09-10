@@ -50,8 +50,19 @@
       <div class="tarjeta">
         <h2>Cliente</h2>
         <div class="campo">
-          <label for="input-cliente-nombre">Nombre / Razón social</label>
-          <input type="text" id="input-cliente-nombre" placeholder="Ej: Ferretería del Centro" />
+          <label for="input-cliente-nombre">Cliente</label>
+          <select id="input-cliente-nombre">
+            <option value="">— Seleccionar cliente —</option>
+            <option value="__nuevo__">+ Agregar cliente nuevo</option>
+          </select>
+        </div>
+        <div class="campo" id="campo-cliente-nuevo" style="display:none;">
+          <label for="input-cliente-nuevo">Nombre del cliente nuevo</label>
+          <div class="rapido-fila">
+            <input type="text" id="input-cliente-nuevo" placeholder="Ej: Pérez Juan" style="flex:1;" />
+            <button type="button" class="btn btn-primario" id="btn-cliente-nuevo-confirmar">Agregar</button>
+            <button type="button" class="btn-icono" id="btn-cliente-nuevo-cancelar" title="Cancelar">✕</button>
+          </div>
         </div>
         <div class="campo">
           <label for="input-cliente-contacto">Contacto (opcional)</label>
