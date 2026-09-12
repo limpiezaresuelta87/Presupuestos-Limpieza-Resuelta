@@ -80,6 +80,11 @@
     return String(numero).replace(/\//g, '_');
   }
 
+  /** ID único por snapshot de precios/costos, a partir de su fecha y hora exacta. */
+  function idDesdeFecha(fechaIso) {
+    return String(fechaIso).replace(/[^a-zA-Z0-9]/g, '_');
+  }
+
   /** Número base de un presupuesto: le saca el "-R2" si es una revisión. */
   function calcularNumeroBase(numero) {
     const m = String(numero).match(/^(.*)-R\d+$/);
@@ -150,7 +155,7 @@
     COL_COSTOS.onSnapshot(function (snap) {
       cache.costosHistoricos = snap.docs
         .map(function (d) { return d.data(); })
-        .sort(function (a, b) { return a.mes < b.mes ? -1 : 1; });
+        .sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; });
       fuentesListas.costos = true;
       chequearListo();
     }, function (err) {
@@ -364,26 +369,30 @@
       return clonar(cache.costosHistoricos);
     },
 
+    /**
+     * Guarda un snapshot NUEVO de precios/costos, sin pisar ninguno anterior
+     * -- cada vez que se actualiza el Excel queda su propio registro
+     * permanente, sea que pase todos los días o cada 3 meses. El ID se arma
+     * a partir de la fecha y hora exacta, así dos actualizaciones el mismo
+     * mes (o el mismo día) nunca se superponen.
+     */
     agregarSnapshotCostos: function (snapshot) {
-      const idx = cache.costosHistoricos.findIndex(function (s) { return s.mes === snapshot.mes; });
-      cache.costosHistoricos = cache.costosHistoricos.slice();
-      if (idx === -1) cache.costosHistoricos.push(snapshot);
-      else cache.costosHistoricos[idx] = snapshot;
-      cache.costosHistoricos.sort(function (a, b) { return a.mes < b.mes ? -1 : 1; });
+      cache.costosHistoricos = cache.costosHistoricos.concat([snapshot])
+        .sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; });
 
-      COL_COSTOS.doc(idSeguro(snapshot.mes)).set(snapshot).catch(function (err) {
-        console.error('[store] No se pudo guardar el snapshot de costos:', err);
+      COL_COSTOS.doc(idDesdeFecha(snapshot.fecha)).set(snapshot).catch(function (err) {
+        console.error('[store] No se pudo guardar el snapshot de precios/costos:', err);
       });
       return true;
     },
 
+    /** Devuelve el snapshot vigente en una fecha dada: el más nuevo cuya fecha sea <= la buscada. */
     obtenerSnapshotCostosMasCercano: function (fechaIso) {
       const historial = this.obtenerHistorialCostos();
       if (historial.length === 0) return null;
-      const objetivo = fechaIso ? fechaIso.slice(0, 7) : null;
       let elegido = null;
       historial.forEach(function (s) {
-        if (!objetivo || s.mes <= objetivo) elegido = s;
+        if (!fechaIso || s.fecha <= fechaIso) elegido = s;
       });
       return elegido || historial[historial.length - 1];
     },
