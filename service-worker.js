@@ -16,7 +16,7 @@
  * usuarios van a seguir viendo la versión vieja cacheada.
  */
 
-const CACHE_VERSION = 'v10';
+const CACHE_VERSION = 'v11';
 const CACHE_NAME = `presupuestos-cache-${CACHE_VERSION}`;
 
 // Todo lo que la app necesita para funcionar SIN conexión.

@@ -122,25 +122,26 @@ document.addEventListener('DOMContentLoaded', () => {
   document.body.addEventListener('click', (e) => {
     if (e.target && e.target.id === 'auth-btn-login') {
       e.target.disabled = true;
-      e.target.textContent = 'Redirigiendo a Google…';
+      e.target.textContent = 'Abriendo Google…';
       const provider = new firebase.auth.GoogleAuthProvider();
-      // signInWithRedirect en vez de signInWithPopup: evita el problema de
-      // ventanas emergentes bloqueadas (o que quedan colgadas) cuando el
-      // navegador tiene varios perfiles/cuentas de Google abiertos. Lleva a
-      // la pantalla de Google y vuelve sola a la app.
-      auth.signInWithRedirect(provider).catch((err) => {
+      // signInWithPopup: Chrome viene "limpiando" a propósito el estado de
+      // sitios intermedios en cadenas de redirección (para bloquear
+      // rastreo), y eso rompe signInWithRedirect porque el login pasa por
+      // el dominio intermedio de Firebase antes de volver a la app. Un
+      // popup no navega por esa cadena, así que no se ve afectado.
+      auth.signInWithPopup(provider).catch((err) => {
         console.error('[firebase] Error al iniciar sesión:', err);
-        mostrarOverlay('No se pudo iniciar sesión. Probá de nuevo.', true);
+        e.target.disabled = false;
+        e.target.textContent = 'Iniciar sesión con Google';
+        if (err.code === 'auth/popup-blocked') {
+          mostrarOverlay('El navegador bloqueó la ventana de Google. Permití ventanas emergentes para este sitio y probá de nuevo.', true);
+        } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+          mostrarOverlay('Se cerró la ventana antes de terminar. Probá de nuevo.', true);
+        } else {
+          mostrarOverlay('No se pudo iniciar sesión (' + (err.code || 'error') + '). Probá de nuevo.', true);
+        }
       });
     }
-  });
-
-  // Atrapa errores del resultado de la redirección (por ejemplo, si el
-  // dominio no está autorizado en Firebase). Si todo sale bien, no hace
-  // falta hacer nada acá: onAuthStateChanged (abajo) se entera solo.
-  auth.getRedirectResult().catch((err) => {
-    console.error('[firebase] Error al completar el inicio de sesión:', err);
-    mostrarOverlay('No se pudo completar el inicio de sesión. Probá de nuevo.', true);
   });
 
   auth.onAuthStateChanged((user) => {
