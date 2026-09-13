@@ -158,8 +158,94 @@
       .slice(0, 80) + '.pdf';
   }
 
+  const SIN_PROVEEDOR = 'Sin proveedor asignado';
+
+  /**
+   * Arma la "lista de compras": las mismas líneas del presupuesto, pero
+   * agrupadas por proveedor (para saber a quién comprarle cada cosa) y
+   * ordenadas alfabéticamente dentro de cada grupo. No es un documento
+   * para el cliente -- no muestra precios de venta, solo qué comprar y
+   * cuánto. El grupo "Sin proveedor asignado" (si hay) siempre va al final.
+   */
+  function construirPDFCompras(presupuesto, mapaProveedores, normalizar) {
+    const jsPDF = window.jspdf.jsPDF;
+    const formatoFecha = window.Quote.formatoFecha;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const margenIzq = 40;
+    let y = 50;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('LISTA DE COMPRAS', margenIzq, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(90);
+    y += 20;
+    doc.text('Para el presupuesto ' + presupuesto.numero + ' — Cliente: ' + (presupuesto.cliente.nombre || '—'), margenIzq, y);
+    y += 14;
+    doc.text('Generada el ' + formatoFecha(new Date().toISOString()), margenIzq, y);
+    y += 20;
+    doc.setDrawColor(210);
+    doc.line(margenIzq, y, 555, y);
+    y += 15;
+    doc.setTextColor(0);
+
+    // Agrupar por proveedor
+    const grupos = {};
+    presupuesto.lineas.forEach(function (l) {
+      const proveedor = mapaProveedores[normalizar(l.articulo)] || SIN_PROVEEDOR;
+      if (!grupos[proveedor]) grupos[proveedor] = [];
+      grupos[proveedor].push(l);
+    });
+
+    // Proveedores en orden alfabético, con "Sin proveedor asignado" siempre al final
+    const nombresProveedores = Object.keys(grupos)
+      .filter(function (p) { return p !== SIN_PROVEEDOR; })
+      .sort(function (a, b) { return a.localeCompare(b, 'es'); });
+    if (grupos[SIN_PROVEEDOR]) nombresProveedores.push(SIN_PROVEEDOR);
+
+    nombresProveedores.forEach(function (proveedor) {
+      const items = grupos[proveedor].slice().sort(function (a, b) {
+        return a.articulo.localeCompare(b.articulo, 'es', { sensitivity: 'base' });
+      });
+
+      // Si no entra el título del proveedor + al menos una fila, saltar de página
+      if (y > 760) { doc.addPage(); y = 50; }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(15, 107, 92);
+      doc.text(proveedor === SIN_PROVEEDOR ? '⚠ ' + SIN_PROVEEDOR : proveedor, margenIzq, y);
+      doc.setTextColor(0);
+      y += 8;
+
+      doc.autoTable({
+        startY: y,
+        head: [['Producto', 'Cantidad']],
+        body: items.map(function (l) { return [l.articulo, String(l.cantidad)]; }),
+        margin: { left: margenIzq, right: 40 },
+        styles: { font: 'helvetica', fontSize: 9, cellPadding: 5, textColor: [0, 0, 0] },
+        headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [245, 247, 246], textColor: [0, 0, 0] },
+        columnStyles: { 1: { halign: 'center', cellWidth: 80 } },
+      });
+
+      y = doc.lastAutoTable.finalY + 22;
+    });
+
+    return doc;
+  }
+
+  function nombreArchivoListaCompras(presupuesto) {
+    return ('Lista_compras_' + presupuesto.numero)
+      .replace(/[^a-zA-Z0-9_\-]+/g, '_')
+      .slice(0, 80) + '.pdf';
+  }
+
   window.PdfGen = {
     construirPDF: construirPDF,
     nombreArchivoPDF: nombreArchivoPDF,
+    construirPDFCompras: construirPDFCompras,
+    nombreArchivoListaCompras: nombreArchivoListaCompras,
   };
 })();

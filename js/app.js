@@ -456,6 +456,13 @@
       });
     });
 
+    $('#btn-lista-compras').addEventListener('click', function () {
+      armarPresupuestoDesdeFormulario({ soloPreview: true }).then(function (presupuesto) {
+        if (!presupuesto) return;
+        descargarListaCompras(presupuesto);
+      });
+    });
+
     $('#btn-descargar-pdf').addEventListener('click', function () {
       armarPresupuestoDesdeFormulario({}).then(function (presupuesto) {
         if (!presupuesto) return;
@@ -625,6 +632,16 @@
     doc.save(PdfGen.nombreArchivoPDF(presupuesto));
   }
 
+  function descargarListaCompras(presupuesto) {
+    if (!presupuesto.lineas || presupuesto.lineas.length === 0) {
+      mostrarAviso('Agregá al menos un producto antes de generar la lista de compras.', true);
+      return;
+    }
+    const mapaProveedores = Store.obtenerMapaProveedores();
+    const doc = PdfGen.construirPDFCompras(presupuesto, mapaProveedores, Pricelist.normalizar);
+    doc.save(PdfGen.nombreArchivoListaCompras(presupuesto));
+  }
+
   // ---------------------------------------------------------------------
   // Historial
   // ---------------------------------------------------------------------
@@ -762,6 +779,7 @@
     $('#btn-recalcular').onclick = function () { recalcularPresupuestoDirecto(presupuesto.numero); };
     $('#btn-detalle-editar').onclick = function () { editarPresupuesto(presupuesto.numero); };
     $('#btn-detalle-pdf').onclick = function () { descargarPDF(presupuesto); };
+    $('#btn-detalle-lista-compras').onclick = function () { descargarListaCompras(presupuesto); };
     $('#btn-detalle-eliminar').onclick = function () { moverPresupuestoAPapelera(presupuesto.numero); };
     $('#btn-detalle-cerrar').onclick = function () { detalle.classList.remove('visible'); };
   }
@@ -1043,7 +1061,12 @@
             (resultado.filasIgnoradas ? ' (' + resultado.filasIgnoradas + ' filas ignoradas por datos incompletos).' : '.') +
             (resultado.snapshotCostos
               ? ' También se guardó el costo de ' + resultado.snapshotCostos.items.length + ' artículos para Informes.'
-              : ' (No se encontró/validó una hoja de costos en este archivo; los informes de ganancia no se actualizaron.)');
+              : ' (No se encontró/validó una hoja de costos en este archivo; los informes de ganancia no se actualizaron.)') +
+            (resultado.sinProveedor && resultado.sinProveedor.length > 0
+              ? ' ⚠ ' + resultado.sinProveedor.length + ' artículo(s) sin proveedor detectado (nombre distinto entre hojas): ' +
+                resultado.sinProveedor.slice(0, 8).join(', ') + (resultado.sinProveedor.length > 8 ? '…' : '') +
+                '. Van a aparecer como "Sin proveedor asignado" en la lista de compras hasta que unifiques el nombre en el Excel.'
+              : '');
           mostrarAviso('Lista de precios actualizada correctamente.');
         })
         .catch(function (err) {

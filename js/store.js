@@ -33,6 +33,7 @@
   const DOC_LISTA_PRECIOS = db.collection('listaPrecios').doc('vigente');
   const COL_COSTOS = db.collection('costosHistoricos');
   const DOC_CLIENTES = db.collection('clientes').doc('lista');
+  const DOC_PROVEEDORES = db.collection('proveedores').doc('mapa');
 
   const SCHEMA_VERSION_ACTUAL = 3;
 
@@ -105,10 +106,11 @@
     listaPrecios: null,
     costosHistoricos: [],
     clientes: [],
+    proveedores: {}, // { articuloNormalizado: nombreProveedor }
   };
 
   let listenersIniciados = false;
-  const fuentesListas = { config: false, historial: false, listaPrecios: false, costos: false, clientes: false };
+  const fuentesListas = { config: false, historial: false, listaPrecios: false, costos: false, clientes: false, proveedores: false };
   let resolversListo = [];
 
   function chequearListo() {
@@ -172,6 +174,16 @@
     }, function (err) {
       console.error('[store] Error escuchando clientes:', err);
       fuentesListas.clientes = true;
+      chequearListo();
+    });
+
+    DOC_PROVEEDORES.onSnapshot(function (snap) {
+      cache.proveedores = snap.exists && snap.data().mapa ? snap.data().mapa : {};
+      fuentesListas.proveedores = true;
+      chequearListo();
+    }, function (err) {
+      console.error('[store] Error escuchando mapa de proveedores:', err);
+      fuentesListas.proveedores = true;
       chequearListo();
     });
   }
@@ -419,6 +431,21 @@
         });
       }
       return limpio;
+    },
+
+    // -------------------------------------------------------------------
+    // Mapa de proveedores (para la lista de compras agrupada)
+    // -------------------------------------------------------------------
+    obtenerMapaProveedores: function () {
+      return Object.assign({}, cache.proveedores);
+    },
+
+    guardarMapaProveedores: function (mapa) {
+      cache.proveedores = mapa;
+      DOC_PROVEEDORES.set({ mapa: mapa, actualizado: new Date().toISOString() }).catch(function (err) {
+        console.error('[store] No se pudo guardar el mapa de proveedores:', err);
+      });
+      return true;
     },
 
     // -------------------------------------------------------------------
