@@ -56,6 +56,10 @@
     return Number.isNaN(n) ? null : n;
   }
 
+  function redondear(valor) {
+    return valor === null || valor === undefined ? null : Math.round(valor * 100) / 100;
+  }
+
   function ordenarHojasPorPrioridad(workbook, pistas) {
     const nombres = workbook.SheetNames;
     const conPista = nombres.filter(function (n) {
@@ -139,7 +143,14 @@
         const camposNecesarios = ['articulo', 'precioUnitario', 'cantidadPack'];
         if (!camposNecesarios.every(function (c) { return c in mapa; })) continue;
 
-        const colCosto = mapa.cantidadPack + 2;
+        const colCosto = mapa.cantidadPack + 2;              // F: costo unitario
+        const colGanancia = colCosto + 1;                     // G: ganancia $ (unitario)
+        const colPctGanancia = colCosto + 2;                  // H: % ganancia esperado (unitario)
+        const colPrecioSegunPct = colCosto + 3;               // I: precio sugerido según % (unitario)
+        const colCostoPack = colCosto + 5;                    // K: costo total del pack
+        const colGananciaPack = colCosto + 6;                 // L: ganancia $ (pack)
+        const colPctGananciaPack = colCosto + 7;              // M: % ganancia esperado (pack)
+        const colPrecioSegunPctPack = colCosto + 8;           // N: precio sugerido según % (pack)
         const items = [];
         let comparables = 0;
         let costoMenorAPrecio = 0;
@@ -162,9 +173,20 @@
             if (costo <= precioVenta * 1.05) costoMenorAPrecio++;
           }
 
+          // El resto de las columnas (ganancia $, % esperado, precio según
+          // %, y sus equivalentes de pack) se guardan "tal cual estén" --
+          // si faltan en alguna fila, quedan en null, sin que eso invalide
+          // el costo unitario (que es el dato imprescindible para Informes).
           items.push({
             articulo: String(nombre).trim().replace(/\s+/g, ' '),
             costoUnitario: Math.round(costo * 100) / 100,
+            gananciaUnitario: redondear(aNumero(fila[colGanancia])),
+            pctGananciaEsperadoUnitario: aNumero(fila[colPctGanancia]),
+            precioSegunPctUnitario: redondear(aNumero(fila[colPrecioSegunPct])),
+            costoPack: redondear(aNumero(fila[colCostoPack])),
+            gananciaPack: redondear(aNumero(fila[colGananciaPack])),
+            pctGananciaEsperadoPack: aNumero(fila[colPctGananciaPack]),
+            precioSegunPctPack: redondear(aNumero(fila[colPrecioSegunPctPack])),
           });
         }
 
@@ -183,6 +205,61 @@
       }
     }
     return null;
+  }
+
+  /**
+   * Lee TODAS las hojas del Excel que no son la de venta ni la de costos, y
+   * arma un mapa artículo -> proveedor. Se basa en que cada hoja adicional
+   * (Garra, MundoBazar, KB, etc.) es justamente la lista de productos de
+   * ESE proveedor -- el nombre de la hoja se usa tal cual como nombre del
+   * proveedor. Usa la comparación normalizada (sin tildes, mayúscula, sin
+   * espacios de más) para calzar con los nombres de la hoja de venta.
+   */
+  function parsearHojasProveedores(workbook, hojasAExcluir) {
+    const mapa = {};
+    workbook.SheetNames.forEach(function (nombreHoja) {
+      if (hojasAExcluir.indexOf(nombreHoja) !== -1) return;
+      const hoja = workbook.Sheets[nombreHoja];
+      const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: null, raw: true });
+
+      let colArticulo = null;
+      let filaInicio = 0;
+      for (let f = 0; f < Math.min(filas.length, 10); f++) {
+        const mapaCols = detectarColumnas(filas[f]);
+        if ('articulo' in mapaCols) {
+          colArticulo = mapaCols.articulo;
+          filaInicio = f + 1;
+          break;
+        }
+      }
+
+      if (colArticulo === null) {
+        // Algunas hojas de proveedor no tienen fila de encabezado real: los
+        // productos arrancan directo en la columna A, justo después del
+        // título "HOJA N" (así son, por ejemplo, "KB" y "Surpack"). En ese
+        // caso usamos la columna A tal cual, saltando solo esa primera fila
+        // de título si existe.
+        colArticulo = 0;
+        filaInicio = 0;
+        for (let f = 0; f < Math.min(filas.length, 5); f++) {
+          const primeraCelda = normalizar(filas[f] && filas[f][0]);
+          if (primeraCelda.indexOf('HOJA') === 0) { filaInicio = f + 1; break; }
+        }
+      }
+
+      for (let r = filaInicio; r < filas.length; r++) {
+        const fila = filas[r];
+        if (!fila) continue;
+        const nombre = fila[colArticulo];
+        if (nombre === null || nombre === undefined || String(nombre).trim() === '') continue;
+        const nombreNorm = normalizar(nombre);
+        if (nombreNorm.indexOf('HOJA') === 0 || nombreNorm === 'PRODUCTO' || nombreNorm === 'PRODUCTOS') continue;
+        // Si el mismo artículo aparece en más de una hoja de proveedor, se
+        // queda con el primero que se encontró (caso raro, no crítico).
+        if (!(nombreNorm in mapa)) mapa[nombreNorm] = nombreHoja.trim();
+      }
+    });
+    return mapa;
   }
 
   function leerArchivoExcel(file) {
@@ -265,9 +342,9 @@
         console.warn('No se pudo leer la hoja de costos de este Excel:', errCostos);
       }
 
-      const costoPorArticulo = {};
+      const datosCostoPorArticulo = {};
       if (resultadoCostos && resultadoCostos.items.length > 0) {
-        resultadoCostos.items.forEach(function (it) { costoPorArticulo[it.articulo] = it.costoUnitario; });
+        resultadoCostos.items.forEach(function (it) { datosCostoPorArticulo[it.articulo] = it; });
       }
 
       const ahora = new Date().toISOString();
@@ -275,19 +352,51 @@
         fecha: ahora,
         mes: ahora.slice(0, 7), // solo informativo, ya no se usa para buscar
         origenArchivo: file.name,
+        // Se guarda TODO lo que trae el Excel para cada artículo: precio de
+        // venta (unidad y pack), costo, ganancia en $ y en %, y el precio
+        // "sugerido" según el % de ganancia esperado -- tal cual está en tu
+        // planilla. Así este historial sirve tanto para Informes de hoy
+        // como para cualquier análisis de márgenes que quieras hacer más
+        // adelante, sin tener que volver a subir el Excel para conseguirlo.
         items: resultado.items.map(function (it) {
+          const datosCosto = datosCostoPorArticulo[it.articulo] || null;
           return {
             articulo: it.articulo,
             precioUnitario: it.precioUnitario,
             precioPack: it.precioPack,
             cantidadPack: it.cantidadPack,
-            costoUnitario: costoPorArticulo.hasOwnProperty(it.articulo) ? costoPorArticulo[it.articulo] : null,
+            costoUnitario: datosCosto ? datosCosto.costoUnitario : null,
+            gananciaUnitario: datosCosto ? datosCosto.gananciaUnitario : null,
+            pctGananciaEsperadoUnitario: datosCosto ? datosCosto.pctGananciaEsperadoUnitario : null,
+            precioSegunPctUnitario: datosCosto ? datosCosto.precioSegunPctUnitario : null,
+            costoPack: datosCosto ? datosCosto.costoPack : null,
+            gananciaPack: datosCosto ? datosCosto.gananciaPack : null,
+            pctGananciaEsperadoPack: datosCosto ? datosCosto.pctGananciaEsperadoPack : null,
+            precioSegunPctPack: datosCosto ? datosCosto.precioSegunPctPack : null,
           };
         }),
       };
       window.Store.agregarSnapshotCostos(snapshotListaPrecios);
 
-      return { lista: lista, filasIgnoradas: resultado.filasIgnoradas, snapshotCostos: snapshotListaPrecios };
+      // Mapa artículo -> proveedor, leyendo el resto de las hojas del Excel
+      // (cada una es la lista de un proveedor puntual). Se guarda aparte
+      // para usarlo después al generar la "lista de compras" de cualquier
+      // presupuesto, sin tener que volver a tocar el Excel.
+      const hojasExcluir = [resultado.hojaUsada];
+      if (resultadoCostos) hojasExcluir.push(resultadoCostos.hojaUsada);
+      const mapaProveedores = parsearHojasProveedores(workbook, hojasExcluir);
+      window.Store.guardarMapaProveedores(mapaProveedores);
+
+      const sinProveedor = resultado.items
+        .map(function (it) { return it.articulo; })
+        .filter(function (articulo) { return !(normalizar(articulo) in mapaProveedores); });
+
+      return {
+        lista: lista,
+        filasIgnoradas: resultado.filasIgnoradas,
+        snapshotCostos: snapshotListaPrecios,
+        sinProveedor: sinProveedor,
+      };
     });
   }
 
@@ -317,5 +426,6 @@
     cargarListaVigente: cargarListaVigente,
     actualizarListaDesdeArchivo: actualizarListaDesdeArchivo,
     buscarProductos: buscarProductos,
+    normalizar: normalizar,
   };
 })();
