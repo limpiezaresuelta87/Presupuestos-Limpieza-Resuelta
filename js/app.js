@@ -373,61 +373,73 @@
   // Guardar presupuesto + generar PDF
   // ---------------------------------------------------------------------
   // ---------------------------------------------------------------------
-  // Selector de cliente: desplegable poblado desde Store.obtenerClientes(),
-  // con una opción para dar de alta un cliente nuevo (se guarda en
-  // Firestore para que las 3 PCs lo vean de inmediato).
+  // Selector de cliente: buscador con autocompletado (igual que el de
+  // productos) contra Store.obtenerClientes(). A medida que el negocio
+  // crezca y haya muchos clientes, escribir y filtrar es mucho más rápido
+  // que scrollear un desplegable. Si lo que se tipea no coincide con
+  // ningún cliente existente, aparece la opción de darlo de alta -- así
+  // siempre se termina eligiendo un nombre de la lista (mismo formato,
+  // en mayúscula) en vez de texto libre, para que las estadísticas y los
+  // informes agrupen bien por cliente.
   // ---------------------------------------------------------------------
-  function renderOpcionesCliente(seleccionado) {
-    const select = $('#input-cliente-nombre');
-    const actual = seleccionado !== undefined ? seleccionado : select.value;
-    select.innerHTML = '';
-    select.appendChild(crearElemento('option', { value: '' }, ['— Seleccionar cliente —']));
-    Store.obtenerClientes().forEach(function (nombre) {
-      select.appendChild(crearElemento('option', { value: nombre }, [nombre]));
-    });
-    select.appendChild(crearElemento('option', { value: '__nuevo__' }, ['+ Agregar cliente nuevo']));
-    // Si el cliente actual (por ejemplo al editar un presupuesto viejo) no
-    // está en la lista, lo agregamos como opción temporal para que se vea
-    // seleccionado, sin guardarlo en la base hasta que se use de nuevo.
-    if (actual && actual !== '__nuevo__' && Store.obtenerClientes().indexOf(actual) === -1) {
-      const opcionTemporal = crearElemento('option', { value: actual }, [actual]);
-      select.insertBefore(opcionTemporal, select.lastChild);
-    }
-    select.value = actual || '';
+  function normalizarNombreCliente(nombre) {
+    return String(nombre || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  }
+
+  function establecerCliente(nombre) {
+    $('#input-cliente-nombre').value = nombre || '';
+    $('#resultados-busqueda-cliente').classList.remove('visible');
   }
 
   function initSelectorCliente() {
-    renderOpcionesCliente('');
+    const input = $('#input-cliente-nombre');
+    const resultados = $('#resultados-busqueda-cliente');
 
-    $('#input-cliente-nombre').addEventListener('change', function (e) {
-      if (e.target.value === '__nuevo__') {
-        $('#campo-cliente-nuevo').style.display = '';
-        $('#input-cliente-nuevo').value = '';
-        $('#input-cliente-nuevo').focus();
-      } else {
-        $('#campo-cliente-nuevo').style.display = 'none';
-      }
-    });
+    function actualizarResultados() {
+      const consulta = input.value.trim();
+      resultados.innerHTML = '';
+      if (!consulta) { resultados.classList.remove('visible'); return; }
 
-    function confirmarClienteNuevo() {
-      const nombre = $('#input-cliente-nuevo').value.trim();
-      if (!nombre) {
-        mostrarAviso('Escribí el nombre del cliente nuevo.', true);
-        return;
+      const consultaNorm = Pricelist.normalizar(consulta);
+      const clientes = Store.obtenerClientes();
+      const coincidencias = clientes.filter(function (c) { return Pricelist.normalizar(c).indexOf(consultaNorm) !== -1; });
+      const normalizado = normalizarNombreCliente(consulta);
+      const yaExiste = clientes.indexOf(normalizado) !== -1;
+
+      coincidencias.forEach(function (nombre) {
+        const li = crearElemento('li', {
+          class: 'resultado-item', tabindex: '0',
+          onclick: function () { establecerCliente(nombre); },
+          onkeydown: function (e) { if (e.key === 'Enter') establecerCliente(nombre); },
+        }, [crearElemento('span', { class: 'resultado-nombre' }, [nombre])]);
+        resultados.appendChild(li);
+      });
+
+      if (!yaExiste) {
+        const li = crearElemento('li', {
+          class: 'resultado-item resultado-agregar', tabindex: '0',
+          onclick: function () { agregarYSeleccionar(consulta); },
+          onkeydown: function (e) { if (e.key === 'Enter') agregarYSeleccionar(consulta); },
+        }, ['+ Agregar "' + normalizado + '" como cliente nuevo']);
+        resultados.appendChild(li);
+      } else if (coincidencias.length === 0) {
+        resultados.appendChild(crearElemento('li', { class: 'resultado-vacio' }, ['Sin coincidencias.']));
       }
-      const nombreGuardado = Store.agregarCliente(nombre);
-      renderOpcionesCliente(nombreGuardado);
-      $('#campo-cliente-nuevo').style.display = 'none';
+
+      resultados.classList.add('visible');
+    }
+
+    function agregarYSeleccionar(nombreTipeado) {
+      const nombreGuardado = Store.agregarCliente(nombreTipeado);
+      if (!nombreGuardado) return;
+      establecerCliente(nombreGuardado);
       mostrarAviso('Cliente "' + nombreGuardado + '" agregado.');
     }
 
-    $('#btn-cliente-nuevo-confirmar').addEventListener('click', confirmarClienteNuevo);
-    $('#input-cliente-nuevo').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); confirmarClienteNuevo(); }
-    });
-    $('#btn-cliente-nuevo-cancelar').addEventListener('click', function () {
-      $('#campo-cliente-nuevo').style.display = 'none';
-      $('#input-cliente-nombre').value = '';
+    input.addEventListener('input', debounce(actualizarResultados, 120));
+    input.addEventListener('focus', actualizarResultados);
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('.buscador-wrap')) resultados.classList.remove('visible');
     });
   }
 
@@ -505,9 +517,10 @@
       mostrarAviso('Agregá al menos un producto antes de generar el presupuesto.', true);
       return Promise.resolve(null);
     }
-    const nombreCliente = $('#input-cliente-nombre').value.trim();
-    if (!nombreCliente || nombreCliente === '__nuevo__') {
-      mostrarAviso('Elegí un cliente (o agregá uno nuevo) antes de continuar.', true);
+    const nombreClienteTipeado = $('#input-cliente-nombre').value.trim();
+    const nombreCliente = normalizarNombreCliente(nombreClienteTipeado);
+    if (!nombreClienteTipeado || Store.obtenerClientes().indexOf(nombreCliente) === -1) {
+      mostrarAviso('Elegí un cliente de la lista (o agregalo con la opción "+ Agregar…") antes de continuar.', true);
       return Promise.resolve(null);
     }
     const totales = renderTotales();
@@ -564,7 +577,7 @@
     ocultarBannerEdicion();
     $('#form-manual').style.display = 'none';
     $('#campo-cliente-nuevo').style.display = 'none';
-    renderOpcionesCliente('');
+    establecerCliente('');
     $('#input-cliente-contacto').value = '';
     $('#input-observaciones').value = '';
     const config = Store.obtenerConfig();
@@ -587,7 +600,7 @@
     estadoApp.edicion = { numeroOriginal: presupuesto.numero, numeroBase: numeroBase };
     estadoApp.carrito = JSON.parse(JSON.stringify(presupuesto.lineas));
 
-    renderOpcionesCliente(presupuesto.cliente.nombre || '');
+    establecerCliente(presupuesto.cliente.nombre || '');
     $('#input-cliente-contacto').value = presupuesto.cliente.contacto || '';
     $('#input-descuento').value = String(presupuesto.descuentoPct || 0);
     $('#input-validez').value = String(presupuesto.validezDias || Store.obtenerConfig().validezDiasPorDefecto);

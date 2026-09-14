@@ -180,6 +180,7 @@ input, textarea { font-family: inherit; }
 .resultado-nombre { font-weight: 500; }
 .resultado-precio { font-family: var(--font-mono); font-size: 0.76rem; color: var(--tinta-suave); white-space: nowrap; }
 .resultado-vacio { padding: 12px 10px; color: var(--tinta-suave); font-size: 0.85rem; }
+.resultado-agregar { color: var(--teal); font-weight: 600; }
 
 /* ------------------------------ Tablas -------------------------------- */
 .tabla-wrap { overflow-x: auto; margin: 10px 0 6px; }
