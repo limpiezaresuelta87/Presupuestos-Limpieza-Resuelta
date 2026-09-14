@@ -1,0 +1,76 @@
+# Despliegue automático a GitHub Pages
+# -----------------------------------------------------------------------
+# Qué hace, en criollo: cada vez que se sube un cambio a la rama "main",
+# esto se dispara solo, revisa que los archivos JS no tengan errores de
+# tipeo, reemplaza la versión del caché del service worker por un
+# identificador único de ese cambio (así el navegador siempre se entera de
+# que hay una versión nueva, sin que nadie tenga que acordarse de subir un
+# número a mano), y publica todo en GitHub Pages.
+#
+# No hace falta tocar este archivo nunca. Si algún día se agrega una
+# carpeta o archivo nuevo al proyecto, no hace falta avisarle a este
+# workflow tampoco -- copia todo tal cual esté en el repositorio.
+# -----------------------------------------------------------------------
+
+name: Desplegar a GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # permite tocar "Run workflow" a mano desde GitHub si hiciera falta
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-y-desplegar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Revisar que los archivos JS no tengan errores de tipeo
+        run: |
+          for f in $(find . -name "*.js" -not -path "./.git/*"); do
+            echo "Revisando $f"
+            node --check "$f"
+          done
+
+      - name: Preparar la carpeta a publicar
+        run: |
+          mkdir -p _publicar
+          # Copia todo el proyecto excepto archivos/carpetas técnicas que
+          # no tienen que quedar publicadas en el sitio.
+          rsync -av \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '_publicar' \
+            ./ _publicar/
+
+      - name: Poner la versión de caché única de este despliegue
+        run: |
+          VERSION="${GITHUB_SHA::8}-$(date -u +%Y%m%d%H%M%S)"
+          echo "Versión de caché: $VERSION"
+          sed -i "s/CACHE_PLACEHOLDER/$VERSION/" _publicar/service-worker.js
+          grep CACHE_VERSION _publicar/service-worker.js
+
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Subir el resultado como artefacto de Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _publicar
+
+      - name: Publicar en GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
