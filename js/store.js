@@ -346,17 +346,27 @@
      * Historial "limpio" para informes/estadísticas: saca los de la
      * papelera y, de cada grupo de revisiones, deja solo la última.
      */
+    /**
+     * Agrupa por número base Y cliente (no solo por número base): si dos
+     * presupuestos de clientes DISTINTOS llegaran a compartir el mismo
+     * número base -- por ejemplo, por una importación vieja que dejó el
+     * contador desalineado -- no se los confunde entre sí como si uno
+     * fuera una revisión del otro. Solo se descarta una fila cuando de
+     * verdad es una revisión anterior del mismo trámite del mismo cliente.
+     */
     obtenerHistorialParaInformes: function () {
       const activos = this.obtenerHistorial(false);
-      const porBase = {};
+      const porBaseYCliente = {};
       activos.forEach(function (p) {
         const base = p.numeroBase || calcularNumeroBase(p.numero);
-        const actual = porBase[base];
+        const cliente = (p.cliente && p.cliente.nombre) || '';
+        const clave = base + '||' + cliente;
+        const actual = porBaseYCliente[clave];
         if (!actual || numeroRevision(p.numero) >= numeroRevision(actual.numero)) {
-          porBase[base] = p;
+          porBaseYCliente[clave] = p;
         }
       });
-      return Object.keys(porBase).map(function (k) { return porBase[k]; });
+      return Object.keys(porBaseYCliente).map(function (k) { return porBaseYCliente[k]; });
     },
 
     // -------------------------------------------------------------------
