@@ -18,6 +18,7 @@
     listaPrecios: null,
     config: null,
     carrito: [],
+    seleccionParaCompra: new Set(), // números tildados en Historial para la lista de compras combinada
     presupuestoAbiertoNumero: null,
     // Si no es null, el carrito activo es una EDICIÓN de un presupuesto ya
     // guardado: { numeroOriginal, numeroBase }. Al guardar se crea una
@@ -29,6 +30,8 @@
     // Si está en true, el panel de Historial muestra la papelera en vez del
     // historial activo.
     verPapelera: false,
+    // Texto tipeado en el buscador de Historial (filtra por cliente o número).
+    filtroHistorial: '',
   };
 
   const $ = function (sel, ctx) { return (ctx || document).querySelector(sel); };
@@ -389,6 +392,15 @@
   function establecerCliente(nombre) {
     $('#input-cliente-nombre').value = nombre || '';
     $('#resultados-busqueda-cliente').classList.remove('visible');
+    // Autocompleta el contacto guardado de este cliente, salvo que ya
+    // haya algo tipeado en ese campo (por ejemplo, al editar un
+    // presupuesto viejo, donde el contacto se pisa a propósito justo
+    // después con el que tenía ese presupuesto en su momento).
+    const campoContacto = $('#input-cliente-contacto');
+    if (nombre && campoContacto && !campoContacto.value.trim()) {
+      const contactoGuardado = Store.obtenerContactoCliente(nombre);
+      if (contactoGuardado) campoContacto.value = contactoGuardado;
+    }
   }
 
   function initSelectorCliente() {
@@ -440,6 +452,21 @@
     input.addEventListener('focus', actualizarResultados);
     document.addEventListener('click', function (e) {
       if (!e.target.closest('.buscador-wrap')) resultados.classList.remove('visible');
+    });
+
+    $('#btn-guardar-contacto-cliente').addEventListener('click', function () {
+      const nombreCliente = normalizarNombreCliente(input.value);
+      if (!nombreCliente || Store.obtenerClientes().indexOf(nombreCliente) === -1) {
+        mostrarAviso('Elegí primero un cliente de la lista antes de guardarle un contacto.', true);
+        return;
+      }
+      const contacto = $('#input-cliente-contacto').value.trim();
+      Store.guardarContactoCliente(nombreCliente, contacto);
+      mostrarAviso(
+        contacto
+          ? 'Guardado como contacto habitual de ' + nombreCliente + '.'
+          : 'Se borró el contacto habitual de ' + nombreCliente + '.'
+      );
     });
   }
 
@@ -614,6 +641,37 @@
     mostrarAviso('Editando ' + presupuesto.numero + '. Al guardar se crea una revisión nueva, sin pisar el original.');
   }
 
+  /**
+   * Duplica un presupuesto viejo como uno NUEVO (no una revisión): copia
+   * cliente y productos/cantidades, pero recalcula los precios contra la
+   * lista vigente -- a diferencia de "Editar", que arranca a propósito con
+   * los precios congelados tal cual estaban. Los artículos manuales (fuera
+   * de la lista) se copian con el mismo precio, porque no hay de dónde
+   * recalcularlos.
+   */
+  function duplicarPresupuesto(numero) {
+    const original = Store.buscarPresupuesto(numero);
+    if (!original) return;
+
+    estadoApp.edicion = null;
+    estadoApp.carrito = JSON.parse(JSON.stringify(original.lineas)).map(function (l) {
+      return Quote.recalcularLinea(l, estadoApp.listaPrecios);
+    });
+
+    establecerCliente(original.cliente.nombre || '');
+    $('#input-cliente-contacto').value = original.cliente.contacto || '';
+    $('#input-descuento').value = String(original.descuentoPct || 0);
+    $('#input-condiciones').value = original.condicionesPago || Store.obtenerConfig().condicionesPagoPorDefecto;
+    $('#input-validez').value = String(original.validezDias || Store.obtenerConfig().validezDiasPorDefecto);
+    $('#input-observaciones').value = original.observaciones || '';
+
+    renderCarrito();
+    ocultarBannerEdicion();
+    $('#detalle-historial').classList.remove('visible');
+    cambiarPestana('nuevo');
+    mostrarAviso('Presupuesto duplicado desde ' + numero + '. Los precios se recalcularon con la lista vigente — revisalos antes de guardar.');
+  }
+
   function mostrarBannerEdicion() {
     if (!estadoApp.edicion) { ocultarBannerEdicion(); return; }
     $('#banner-edicion-texto').textContent =
@@ -651,7 +709,8 @@
       return;
     }
     const mapaProveedores = Store.obtenerMapaProveedores();
-    const doc = PdfGen.construirPDFCompras(presupuesto, mapaProveedores, Pricelist.normalizar);
+    const obtenerCosto = function (articulo) { return Store.obtenerCostoDeArticulo(articulo, presupuesto.fecha); };
+    const doc = PdfGen.construirPDFCompras(presupuesto, mapaProveedores, Pricelist.normalizar, obtenerCosto);
     doc.save(PdfGen.nombreArchivoListaCompras(presupuesto));
   }
 
@@ -660,7 +719,17 @@
   // ---------------------------------------------------------------------
   function renderHistorial() {
     const tbody = $('#tabla-historial tbody');
-    const historial = estadoApp.verPapelera ? Store.obtenerPapelera() : Store.obtenerHistorial();
+    let historial = estadoApp.verPapelera ? Store.obtenerPapelera() : Store.obtenerHistorial();
+
+    const consulta = (estadoApp.filtroHistorial || '').trim();
+    if (consulta) {
+      const consultaNorm = Pricelist.normalizar(consulta);
+      historial = historial.filter(function (p) {
+        return Pricelist.normalizar(p.numero).indexOf(consultaNorm) !== -1 ||
+          Pricelist.normalizar(p.cliente.nombre).indexOf(consultaNorm) !== -1;
+      });
+    }
+
     tbody.innerHTML = '';
 
     const btnPapelera = $('#btn-toggle-papelera');
@@ -675,8 +744,12 @@
     if (historial.length === 0) {
       tbody.appendChild(
         crearElemento('tr', {}, [crearElemento('td', {
-          colspan: '6', class: 'vacio',
-        }, [estadoApp.verPapelera ? 'La papelera está vacía.' : 'Todavía no generaste presupuestos.'])])
+          colspan: '7', class: 'vacio',
+        }, [
+          consulta
+            ? 'Ningún presupuesto coincide con "' + consulta + '".'
+            : (estadoApp.verPapelera ? 'La papelera está vacía.' : 'Todavía no generaste presupuestos.'),
+        ])])
       );
       return;
     }
@@ -697,6 +770,7 @@
         : [
             crearElemento('button', { class: 'btn-mini', onclick: function () { verDetalleHistorial(p.numero); } }, ['Ver']),
             crearElemento('button', { class: 'btn-mini', onclick: function () { editarPresupuesto(p.numero); } }, ['Editar']),
+            crearElemento('button', { class: 'btn-mini', onclick: function () { duplicarPresupuesto(p.numero); } }, ['Duplicar']),
             crearElemento('button', { class: 'btn-mini', onclick: function () { recalcularPresupuestoDirecto(p.numero); } }, ['Recalcular']),
             crearElemento('button', { class: 'btn-mini', onclick: function () { descargarPDF(p); } }, ['PDF']),
             crearElemento('button', {
@@ -705,7 +779,23 @@
             }, ['Eliminar']),
           ];
 
+      const celdaCheck = estadoApp.verPapelera
+        ? crearElemento('td', {}, [])
+        : (function () {
+            const check = crearElemento('input', {
+              type: 'checkbox',
+              onchange: function (e) {
+                if (e.target.checked) estadoApp.seleccionParaCompra.add(p.numero);
+                else estadoApp.seleccionParaCompra.delete(p.numero);
+                actualizarBotonListaCombinada();
+              },
+            });
+            check.checked = estadoApp.seleccionParaCompra.has(p.numero);
+            return crearElemento('td', {}, [check]);
+          })();
+
       const tr = crearElemento('tr', {}, [
+        celdaCheck,
         crearElemento('td', {}, [p.numero]),
         crearElemento('td', {}, [Quote.formatoFecha(p.fecha)]),
         crearElemento('td', {}, [p.cliente.nombre]),
@@ -715,6 +805,55 @@
       ]);
       tbody.appendChild(tr);
     });
+    actualizarBotonListaCombinada();
+  }
+
+  /** Actualiza el texto/estado del botón de lista de compras combinada según cuántos hay tildados. */
+  function actualizarBotonListaCombinada() {
+    const btn = $('#btn-lista-compras-combinada');
+    if (!btn) return;
+    const cantidad = estadoApp.seleccionParaCompra.size;
+    btn.disabled = cantidad === 0;
+    btn.textContent = cantidad === 0
+      ? 'Lista de compras combinada'
+      : 'Lista de compras combinada (' + cantidad + ')';
+  }
+
+  /** Junta las líneas de varios presupuestos en una sola lista, sumando cantidades de un mismo artículo. */
+  function combinarLineasParaCompra(presupuestos) {
+    const acumulado = {};
+    presupuestos.forEach(function (p) {
+      p.lineas.forEach(function (l) {
+        if (!acumulado[l.articulo]) acumulado[l.articulo] = { articulo: l.articulo, cantidad: 0 };
+        acumulado[l.articulo].cantidad += l.cantidad;
+      });
+    });
+    return Object.keys(acumulado)
+      .sort(function (a, b) { return a.localeCompare(b, 'es', { sensitivity: 'base' }); })
+      .map(function (k) { return acumulado[k]; });
+  }
+
+  function generarListaCompraCombinada() {
+    const numeros = Array.from(estadoApp.seleccionParaCompra);
+    if (numeros.length === 0) return;
+    const presupuestos = numeros.map(function (n) { return Store.buscarPresupuesto(n); }).filter(Boolean);
+    if (presupuestos.length === 0) {
+      mostrarAviso('No se encontraron los presupuestos tildados.', true);
+      return;
+    }
+    const clientesIncluidos = Array.from(new Set(presupuestos.map(function (p) { return p.cliente.nombre; })));
+    const presupuestoCombinado = {
+      // No es un presupuesto real (no se guarda en el historial) -- es solo
+      // un objeto de paso para reusar el mismo generador de PDF. El costo
+      // de cada línea se busca con la fecha de HOY (no la de cada pedido
+      // original), porque lo que importa es qué comprar y a qué costo
+      // vigente comprarlo, no el costo que regía cuando se armó cada uno.
+      numero: presupuestos.map(function (p) { return p.numero; }).join(', '),
+      cliente: { nombre: clientesIncluidos.join(', ') },
+      fecha: new Date().toISOString(),
+      lineas: combinarLineasParaCompra(presupuestos),
+    };
+    descargarListaCompras(presupuestoCombinado);
   }
 
   /**
@@ -791,6 +930,7 @@
 
     $('#btn-recalcular').onclick = function () { recalcularPresupuestoDirecto(presupuesto.numero); };
     $('#btn-detalle-editar').onclick = function () { editarPresupuesto(presupuesto.numero); };
+    $('#btn-detalle-duplicar').onclick = function () { duplicarPresupuesto(presupuesto.numero); };
     $('#btn-detalle-pdf').onclick = function () { descargarPDF(presupuesto); };
     $('#btn-detalle-lista-compras').onclick = function () { descargarListaCompras(presupuesto); };
     $('#btn-detalle-eliminar').onclick = function () { moverPresupuestoAPapelera(presupuesto.numero); };
@@ -908,6 +1048,12 @@
       if (file) importarHistorialDesdeArchivo(file);
       e.target.value = '';
     });
+    $('#btn-lista-compras-combinada').addEventListener('click', generarListaCompraCombinada);
+
+    $('#buscador-historial').addEventListener('input', debounce(function (e) {
+      estadoApp.filtroHistorial = e.target.value;
+      renderHistorial();
+    }, 150));
   }
 
   // ---------------------------------------------------------------------
@@ -922,8 +1068,11 @@
       exportadoEl: new Date().toISOString(),
       tipo: 'backup-completo-presupuestos',
       config: Store.obtenerConfig(),
-      historial: Store.obtenerHistorial(),
+      historial: Store.obtenerHistorial(true), // incluye papelera, para que un backup sea realmente completo
       listaPrecios: Store.obtenerListaPrecios(),
+      clientes: { nombres: Store.obtenerClientes(), contactos: Store.obtenerContactosClientes() },
+      proveedores: Store.obtenerMapaProveedores(),
+      costosHistoricos: Store.obtenerHistorialCostos(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -960,6 +1109,15 @@
         }
         if (data.listaPrecios && Array.isArray(data.listaPrecios.items)) {
           Store.guardarListaPrecios(data.listaPrecios);
+        }
+        if (data.clientes) {
+          Store.restaurarClientes(data.clientes);
+        }
+        if (data.proveedores) {
+          Store.guardarMapaProveedores(data.proveedores);
+        }
+        if (Array.isArray(data.costosHistoricos)) {
+          Store.restaurarCostosHistoricos(data.costosHistoricos);
         }
         estadoApp.config = Store.obtenerConfig();
         estadoApp.listaPrecios = Store.obtenerListaPrecios() || estadoApp.listaPrecios;
@@ -1032,6 +1190,64 @@
       if (logoPendiente) config.empresa.logoBase64 = logoPendiente;
       Store.guardarConfig(config);
       mostrarAviso('Configuración guardada.');
+    });
+
+    initUsuariosAutorizados();
+  }
+
+  // ---------------------------------------------------------------------
+  // Usuarios autorizados (login)
+  // ---------------------------------------------------------------------
+  function renderUsuariosAutorizados() {
+    const lista = $('#lista-usuarios-autorizados');
+    if (!lista || !window.Auth) return;
+    lista.innerHTML = '';
+    window.Auth.obtenerUsuariosAutorizados().forEach(function (email) {
+      lista.appendChild(crearElemento('li', {}, [
+        crearElemento('span', {}, [email]),
+        crearElemento('button', {
+          class: 'btn-mini btn-mini-peligro', type: 'button',
+          onclick: function () { quitarUsuario(email); },
+        }, ['Quitar']),
+      ]));
+    });
+  }
+
+  function quitarUsuario(email) {
+    const propio = window.Auth.currentUser() && window.Auth.currentUser().email === email;
+    const mensaje = propio
+      ? 'Ese es TU propio correo — si lo sacás, te vas a quedar sin acceso vos también. ¿Confirmás?'
+      : 'Sacar el acceso de ' + email + '. ¿Confirmás?';
+    if (!window.confirm(mensaje)) return;
+    window.Auth.quitarUsuarioAutorizado(email).then(function () {
+      renderUsuariosAutorizados();
+      mostrarAviso('Se sacó el acceso de ' + email + '.');
+    }).catch(function (err) {
+      mostrarAviso(err.message || 'No se pudo sacar ese correo.', true);
+    });
+  }
+
+  function initUsuariosAutorizados() {
+    renderUsuariosAutorizados();
+
+    $('#btn-agregar-usuario').addEventListener('click', function () {
+      const input = $('#input-usuario-nuevo');
+      const email = input.value.trim();
+      if (!email || email.indexOf('@') === -1) {
+        mostrarAviso('Ingresá un correo válido.', true);
+        return;
+      }
+      window.Auth.agregarUsuarioAutorizado(email).then(function () {
+        input.value = '';
+        renderUsuariosAutorizados();
+        mostrarAviso('Se agregó ' + email + '. Ya puede iniciar sesión.');
+      }).catch(function (err) {
+        mostrarAviso(err.message || 'No se pudo agregar ese correo.', true);
+      });
+    });
+
+    $('#input-usuario-nuevo').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); $('#btn-agregar-usuario').click(); }
     });
   }
 

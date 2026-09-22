@@ -63,7 +63,10 @@
         </div>
         <div class="campo">
           <label for="input-cliente-contacto">Contacto (opcional)</label>
-          <input type="text" id="input-cliente-contacto" placeholder="Teléfono, email o dirección" />
+          <div class="rapido-fila">
+            <input type="text" id="input-cliente-contacto" placeholder="Teléfono, email o dirección" style="flex:1;" />
+            <button type="button" class="btn-mini" id="btn-guardar-contacto-cliente" title="Guardar como contacto habitual de este cliente">💾 Guardar</button>
+          </div>
         </div>
       </div>
 
@@ -174,10 +177,15 @@
         <h2 id="historial-titulo">Historial de presupuestos</h2>
         <div class="historial-herramientas">
           <button class="btn btn-secundario" id="btn-toggle-papelera">Papelera (0)</button>
+          <button class="btn btn-secundario" id="btn-lista-compras-combinada" disabled>Lista de compras combinada</button>
           <button class="btn btn-secundario" id="btn-exportar-historial">Exportar historial</button>
           <button class="btn btn-secundario" id="btn-importar-historial">Importar historial</button>
           <input type="file" id="input-importar-historial" accept=".json" hidden />
         </div>
+      </div>
+      <div class="campo" style="max-width:420px;">
+        <label for="buscador-historial">Buscar por cliente o número</label>
+        <input type="text" id="buscador-historial" placeholder="Ej: Villanueva, PRES-0012…" autocomplete="off" />
       </div>
       <p class="texto-ayuda">
         Usá esto para juntar en un mismo lugar los presupuestos generados en distintos
@@ -185,10 +193,16 @@
         que quieras copiar, mandate ese archivo (WhatsApp, mail, etc.) y en el otro
         dispositivo importalo: solo agrega los que falten, nunca duplica ni pisa los que ya tenés.
       </p>
+      <p class="texto-ayuda">
+        Tildá la casilla de varios presupuestos pendientes de la tabla para generar
+        una sola lista de compras con todo combinado (suma las cantidades de un
+        mismo producto entre pedidos distintos), agrupada por proveedor.
+      </p>
       <div class="tabla-wrap">
         <table id="tabla-historial">
           <thead>
             <tr>
+              <th></th>
               <th>N°</th>
               <th>Fecha</th>
               <th>Cliente</th>
@@ -233,6 +247,7 @@
 
       <div class="acciones-presupuesto">
         <button class="btn btn-secundario" id="btn-detalle-editar">Editar</button>
+        <button class="btn btn-secundario" id="btn-detalle-duplicar">Duplicar como nuevo</button>
         <button class="btn btn-secundario" id="btn-recalcular">Recalcular con lista vigente</button>
         <button class="btn btn-secundario" id="btn-detalle-lista-compras">Lista de compras (por proveedor)</button>
         <button class="btn btn-primario" id="btn-detalle-pdf">Descargar / reimprimir PDF</button>
@@ -333,6 +348,17 @@
 
       <div class="acciones-presupuesto">
         <button class="btn btn-primario" id="btn-guardar-configuracion">Guardar configuración</button>
+      </div>
+
+      <h2>Usuarios autorizados</h2>
+      <p class="texto-ayuda">
+        Solo estos correos de Google pueden iniciar sesión y usar la app.
+        Agregar o sacar un acceso queda activo al instante, sin tocar nada de código.
+      </p>
+      <ul id="lista-usuarios-autorizados" class="lista-simple"></ul>
+      <div class="rapido-fila" style="max-width:420px; margin-top:10px;">
+        <input type="email" id="input-usuario-nuevo" placeholder="correo@gmail.com" style="flex:1;" />
+        <button type="button" class="btn btn-primario" id="btn-agregar-usuario">Agregar</button>
       </div>
 
       <h2>Copia de seguridad completa</h2>

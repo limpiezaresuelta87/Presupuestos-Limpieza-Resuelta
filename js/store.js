@@ -106,6 +106,7 @@
     listaPrecios: null,
     costosHistoricos: [],
     clientes: [],
+    contactosClientes: {}, // { nombreCliente: contacto }
     proveedores: {}, // { articuloNormalizado: nombreProveedor }
   };
 
@@ -167,8 +168,10 @@
     });
 
     DOC_CLIENTES.onSnapshot(function (snap) {
-      const nombres = snap.exists && Array.isArray(snap.data().nombres) ? snap.data().nombres : [];
+      const datos = snap.exists ? snap.data() : {};
+      const nombres = Array.isArray(datos.nombres) ? datos.nombres : [];
       cache.clientes = nombres.slice().sort(function (a, b) { return a.localeCompare(b, 'es'); });
+      cache.contactosClientes = datos.contactos && typeof datos.contactos === 'object' ? datos.contactos : {};
       fuentesListas.clientes = true;
       chequearListo();
     }, function (err) {
@@ -238,16 +241,41 @@
      * un número distinto (reintenta solo si hay choque). Por eso es la
      * única función de Store que devuelve una Promise en vez del valor
      * directo -- ver los 2 puntos en app.js que hacen .then() con esto.
+     *
+     * A PRUEBA DE CHOQUES: antes de entregar un número, verifica contra el
+     * historial REAL que no esté ya usado (no confía ciegamente en el
+     * contador guardado). Si lo está -- por ejemplo, porque una
+     * importación vieja lo dejó desalineado, como pasó una vez -- lo
+     * salta solo y prueba el siguiente, sin que haga falta corregir nada
+     * a mano en Configuración nunca más.
      */
     tomarSiguienteNumero: function () {
+      const MAX_INTENTOS = 200;
       return db.runTransaction(function (tx) {
         return tx.get(DOC_CONFIG).then(function (doc) {
           const config = completarConfig(doc.exists ? doc.data() : null);
-          const n = config.numeracion.siguienteNumero;
-          const numeroFormateado = config.numeracion.prefijo + String(n).padStart(config.numeracion.padding, '0');
-          config.numeracion.siguienteNumero = n + 1;
-          tx.set(DOC_CONFIG, config);
-          return numeroFormateado;
+          let n = config.numeracion.siguienteNumero;
+
+          function probarSiguiente(intento) {
+            if (intento > MAX_INTENTOS) {
+              throw new Error(
+                'No se encontró un número de presupuesto libre después de ' + MAX_INTENTOS +
+                ' intentos. Revisá la numeración en Configuración.'
+              );
+            }
+            const numeroFormateado = config.numeracion.prefijo + String(n).padStart(config.numeracion.padding, '0');
+            return tx.get(COL_HISTORIAL.doc(idSeguro(numeroFormateado))).then(function (docExistente) {
+              if (docExistente.exists) {
+                n++;
+                return probarSiguiente(intento + 1);
+              }
+              config.numeracion.siguienteNumero = n + 1;
+              tx.set(DOC_CONFIG, config);
+              return numeroFormateado;
+            });
+          }
+
+          return probarSiguiente(1);
         });
       });
     },
@@ -419,6 +447,19 @@
       return elegido || historial[historial.length - 1];
     },
 
+    /**
+     * Costo unitario de UN artículo puntual, vigente en una fecha dada (o
+     * el más reciente disponible si no hay ninguno anterior a esa fecha).
+     * Devuelve null si no hay ningún snapshot guardado, o si ese artículo
+     * no aparece en el snapshot encontrado.
+     */
+    obtenerCostoDeArticulo: function (articulo, fechaIso) {
+      const snap = this.obtenerSnapshotCostosMasCercano(fechaIso);
+      if (!snap) return null;
+      const item = snap.items.find(function (it) { return it.articulo === articulo; });
+      return item && item.costoUnitario !== undefined ? item.costoUnitario : null;
+    },
+
     // -------------------------------------------------------------------
     // Clientes (para el desplegable del formulario de presupuesto)
     // -------------------------------------------------------------------
@@ -436,11 +477,58 @@
       if (!limpio) return null;
       if (cache.clientes.indexOf(limpio) === -1) {
         cache.clientes = cache.clientes.concat([limpio]).sort(function (a, b) { return a.localeCompare(b, 'es'); });
-        DOC_CLIENTES.set({ nombres: cache.clientes }).catch(function (err) {
+        DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
           console.error('[store] No se pudo guardar el cliente nuevo:', err);
         });
       }
       return limpio;
+    },
+
+    /** Contacto guardado de un cliente (teléfono/email/dirección habitual), o '' si no tiene. */
+    obtenerContactoCliente: function (nombre) {
+      return cache.contactosClientes[nombre] || '';
+    },
+
+    /**
+     * Guarda (o actualiza) el contacto habitual de un cliente, para que la
+     * próxima vez que se lo elija en un presupuesto nuevo se autocomplete
+     * solo, sin tener que volver a tipearlo.
+     */
+    guardarContactoCliente: function (nombre, contacto) {
+      if (!nombre) return false;
+      cache.contactosClientes = Object.assign({}, cache.contactosClientes, { [nombre]: String(contacto || '').trim() });
+      DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
+        console.error('[store] No se pudo guardar el contacto del cliente:', err);
+      });
+      return true;
+    },
+
+    /** Todos los contactos guardados, para el backup completo. */
+    obtenerContactosClientes: function () {
+      return Object.assign({}, cache.contactosClientes);
+    },
+
+    /** Reemplaza TODA la lista de clientes + contactos de una vez (usado al restaurar un backup). */
+    restaurarClientes: function (datos) {
+      const nombres = (datos && Array.isArray(datos.nombres) ? datos.nombres : []).slice()
+        .sort(function (a, b) { return a.localeCompare(b, 'es'); });
+      const contactos = (datos && datos.contactos && typeof datos.contactos === 'object') ? datos.contactos : {};
+      cache.clientes = nombres;
+      cache.contactosClientes = contactos;
+      DOC_CLIENTES.set({ nombres: nombres, contactos: contactos }).catch(function (err) {
+        console.error('[store] No se pudo restaurar la lista de clientes:', err);
+      });
+      return true;
+    },
+
+    /** Reemplaza TODO el historial de precios/costos de una vez (usado al restaurar un backup). */
+    restaurarCostosHistoricos: function (snapshots) {
+      const lista = Array.isArray(snapshots) ? snapshots.slice() : [];
+      cache.costosHistoricos = lista.sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; });
+      escribirEnLotes(COL_COSTOS, lista, function (s) { return s.fecha; }).catch(function (err) {
+        console.error('[store] No se pudo restaurar el historial de costos:', err);
+      });
+      return true;
     },
 
     // -------------------------------------------------------------------

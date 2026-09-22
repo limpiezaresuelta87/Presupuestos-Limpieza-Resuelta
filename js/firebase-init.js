@@ -8,24 +8,22 @@
  *  1) Inicializa Firebase con tu configuración del proyecto.
  *  2) Muestra una pantalla de login (Google) tapando toda la app
  *     hasta que haya una sesión válida.
- *  3) Solo deja pasar a los emails de EMAILS_AUTORIZADOS. A
- *     cualquier otro lo desloguea automáticamente y muestra un
- *     aviso — esto es solo para UX; la seguridad real la ponen
- *     las Reglas de Firestore (firestore.rules), que rechazan
- *     igual cualquier lectura/escritura de un email no permitido
- *     aunque alguien desactive este archivo a mano.
+ *  3) Solo deja pasar a los correos que están guardados en Firestore
+ *     (colección config, documento usuariosAutorizados -- ver más abajo).
+ *     A cualquier otro lo desloguea automáticamente y muestra un aviso.
+ *     Esto ya NO es solo para UX: las Reglas de Firestore
+ *     (firestore.rules) leen ESE MISMO documento para decidir a quién
+ *     dejar pasar, así que hay un solo lugar donde administrar quién
+ *     tiene acceso -- ya no hay que tocar código para agregar o sacar
+ *     a alguien, se hace desde Configuración → Usuarios autorizados.
  *  4) Expone window.Auth.currentUser() y window.Auth.onReady(fn)
  *     para que el resto de la app (store.js) sepa cuándo ya hay
- *     sesión y pueda empezar a leer/escribir en Firestore.
+ *     sesión y pueda empezar a leer/escribir en Firestore. También
+ *     expone funciones para administrar la lista de correos (ver
+ *     window.Auth.obtenerUsuariosAutorizados / agregarUsuarioAutorizado
+ *     / quitarUsuarioAutorizado, usadas desde la pantalla de
+ *     Configuración).
  */
-
-// EDITAR ACÁ: los correos de Google de las 3 PCs / personas que
-// pueden usar la app. Agregar o sacar líneas según haga falta.
-const EMAILS_AUTORIZADOS = [
-  "limpiezaresuelta87@gmail.com",
-  "cpn.jauregui@gmail.com",
-  "jaureguipablog@hotmail.com",
-];
 
 const firebaseConfig = {
   apiKey: "AIzaSyDjpcxlgVPn8ECOOZ-6j-fB3hxQJm5Odig",
@@ -40,6 +38,18 @@ firebase.initializeApp(firebaseConfig);
 
 const auth = firebase.auth();
 const db = firebase.firestore();
+const DOC_USUARIOS = db.collection('config').doc('usuariosAutorizados');
+
+// Solo se usa UNA vez, la primerísima vez que corre esto contra un
+// proyecto nuevo (si el documento de Firestore todavía no existe, se crea
+// sembrado con estos 3 correos). Una vez creado el documento, esta
+// constante ya no se vuelve a mirar nunca más -- de ahí en más, la lista
+// real vive en Firestore y se administra desde Configuración.
+const CORREOS_INICIALES = [
+  "limpiezaresuelta87@gmail.com",
+  "cpn.jauregui@gmail.com",
+  "jaureguipablog@hotmail.com",
+];
 
 // Guardado local automático: si se pierde la conexión, las
 // lecturas/escrituras se encolan en el dispositivo y se sincronizan
@@ -102,8 +112,25 @@ function ocultarOverlay() {
   if (overlay) overlay.style.display = 'none';
 }
 
+/**
+ * Trae la lista de correos autorizados desde Firestore. Si el documento
+ * todavía no existe (proyecto recién migrado), lo crea sembrado con
+ * CORREOS_INICIALES -- esto solo pasa la primera vez.
+ */
+function obtenerODerivarListaAutorizados() {
+  return DOC_USUARIOS.get().then(function (snap) {
+    if (snap.exists && Array.isArray(snap.data().emails)) {
+      return snap.data().emails;
+    }
+    return DOC_USUARIOS.set({ emails: CORREOS_INICIALES }).then(function () {
+      return CORREOS_INICIALES;
+    });
+  });
+}
+
 // ---------- API pública para el resto de la app ----------
 let usuarioActual = null;
+let listaAutorizadosCache = [];
 const callbacksListos = [];
 
 window.Auth = {
@@ -113,6 +140,42 @@ window.Auth = {
     else callbacksListos.push(fn);
   },
   signOut: () => auth.signOut(),
+
+  /** Lista de correos autorizados tal como está guardada ahora mismo (para mostrarla en Configuración). */
+  obtenerUsuariosAutorizados: function () {
+    return listaAutorizadosCache.slice();
+  },
+
+  /** Agrega un correo nuevo a la lista. Devuelve una Promise. */
+  agregarUsuarioAutorizado: function (email) {
+    const limpio = String(email || '').trim().toLowerCase();
+    if (!limpio) return Promise.reject(new Error('Correo vacío.'));
+    if (listaAutorizadosCache.map(function (e) { return e.toLowerCase(); }).indexOf(limpio) !== -1) {
+      return Promise.resolve(listaAutorizadosCache); // ya estaba, no hace falta nada más
+    }
+    const nueva = listaAutorizadosCache.concat([limpio]);
+    return DOC_USUARIOS.set({ emails: nueva }).then(function () {
+      listaAutorizadosCache = nueva;
+      return nueva;
+    });
+  },
+
+  /**
+   * Saca un correo de la lista. Por seguridad, nunca deja la lista
+   * vacía (siempre tiene que quedar al menos 1 correo con acceso) --
+   * si ya es el último, rechaza la Promise con un mensaje claro.
+   */
+  quitarUsuarioAutorizado: function (email) {
+    if (listaAutorizadosCache.length <= 1) {
+      return Promise.reject(new Error('No podés sacar el último correo autorizado: te quedarías sin acceso.'));
+    }
+    const limpio = String(email || '').trim().toLowerCase();
+    const nueva = listaAutorizadosCache.filter(function (e) { return e.toLowerCase() !== limpio; });
+    return DOC_USUARIOS.set({ emails: nueva }).then(function () {
+      listaAutorizadosCache = nueva;
+      return nueva;
+    });
+  },
 };
 
 // ---------- Lógica de sesión ----------
@@ -151,18 +214,26 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const email = (user.email || '').toLowerCase();
-    const autorizado = EMAILS_AUTORIZADOS.map((e) => e.toLowerCase()).includes(email);
+    obtenerODerivarListaAutorizados().then(function (emails) {
+      listaAutorizadosCache = emails;
+      const email = (user.email || '').toLowerCase();
+      const autorizado = emails.map(function (e) { return e.toLowerCase(); }).indexOf(email) !== -1;
 
-    if (!autorizado) {
+      if (!autorizado) {
+        auth.signOut();
+        usuarioActual = null;
+        mostrarOverlay(`El correo ${user.email} no está autorizado para usar esta app.`, true);
+        return;
+      }
+
+      usuarioActual = user;
+      ocultarOverlay();
+      callbacksListos.splice(0).forEach((fn) => fn(user));
+    }).catch(function (err) {
+      console.error('[firebase] No se pudo verificar la lista de correos autorizados:', err);
       auth.signOut();
       usuarioActual = null;
-      mostrarOverlay(`El correo ${user.email} no está autorizado para usar esta app.`, true);
-      return;
-    }
-
-    usuarioActual = user;
-    ocultarOverlay();
-    callbacksListos.splice(0).forEach((fn) => fn(user));
+      mostrarOverlay('No se pudo verificar el acceso. Probá de nuevo.', true);
+    });
   });
 });

@@ -1,17 +1,16 @@
 // Reglas de seguridad de Firestore
 // -------------------------------------------------------------
 // Cómo usarlas: Firebase Console → Firestore Database → pestaña
-// "Reglas" → pegar esto → Publicar.
+// "Reglas" → pegar esto → Publicar. Esto solo hace falta pegarlo UNA VEZ
+// -- a partir de acá, la lista de quién tiene acceso ya NO vive en este
+// archivo ni en el código: vive en el propio Firestore (colección config,
+// documento usuariosAutorizados), y se administra desde la app
+// (Configuración → Usuarios autorizados). Estas reglas leen ESE
+// documento para decidir a quién dejar pasar.
 //
-// Qué hacen: solo dejan leer y escribir a los emails de la lista
-// de abajo. Esta es la seguridad REAL — aunque alguien desactive
-// el login en el navegador (inspeccionando el código), Firestore
-// va a rechazar igual cualquier operación de un email no permitido.
-//
-// IMPORTANTE: mantené esta lista IGUAL a EMAILS_AUTORIZADOS en
-// js/firebase-init.js. Son dos listas separadas a propósito (una
-// vive en tu código, la otra en los servidores de Firebase), pero
-// tienen que decir lo mismo.
+// Esta sigue siendo la seguridad REAL: aunque alguien desactive el login
+// en el navegador (inspeccionando el código), Firestore va a rechazar
+// igual cualquier operación de un correo que no esté en esa lista.
 
 rules_version = '2';
 
@@ -19,12 +18,17 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function esUsuarioAutorizado() {
-      return request.auth != null && request.auth.token.email in [
-        // EDITAR ACÁ TAMBIÉN — misma lista que en firebase-init.js
-        "limpiezaresuelta87@gmail.com",
-        "cpn.jauregui@gmail.com",
-        "jaureguipablog@hotmail.com"
-      ];
+      return request.auth != null &&
+        request.auth.token.email in get(/databases/$(database)/documents/config/usuariosAutorizados).data.emails;
+    }
+
+    // El documento con la lista de correos se puede LEER con cualquier
+    // sesión de Google iniciada (así la app puede avisarle a alguien no
+    // autorizado que no tiene acceso), pero solo alguien YA autorizado
+    // puede modificarlo (agregar/sacar correos).
+    match /config/usuariosAutorizados {
+      allow read: if request.auth != null;
+      allow write: if esUsuarioAutorizado();
     }
 
     match /{document=**} {

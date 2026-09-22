@@ -76,11 +76,12 @@
 
     <div class="tarjeta">
       <h2>Ventas por mes</h2>
-      <div id="chart-ventas-mes" class="chart-barras"></div>
+      <div class="chart-wrap"><canvas id="chart-ventas-mes"></canvas></div>
     </div>
 
     <div class="tarjeta">
       <h2>Artículos más vendidos</h2>
+      <div class="chart-wrap chart-wrap-chico"><canvas id="chart-top-articulos"></canvas></div>
       <div class="tabla-wrap">
         <table id="tabla-top-articulos">
           <thead><tr><th>Artículo</th><th>Cant.</th><th>Total</th></tr></thead>
@@ -91,6 +92,7 @@
 
     <div class="tarjeta">
       <h2>Ranking de clientes</h2>
+      <div class="chart-wrap chart-wrap-chico"><canvas id="chart-ranking-clientes"></canvas></div>
       <div class="tabla-wrap">
         <table id="tabla-ranking-clientes">
           <thead><tr><th>Cliente</th><th>Presup.</th><th>Total</th></tr></thead>
@@ -114,12 +116,31 @@
       </div>
     </div>
 
+    <div class="tarjeta">
+      <h2>Margen real vs. objetivo</h2>
+      <p class="texto-ayuda">
+        Compara el margen que se vino logrando de verdad (según lo vendido en el
+        período filtrado) contra el % de ganancia esperado que cargaste en la
+        última hoja de Excel. Ordenado del más alejado del objetivo al que mejor lo
+        cumple — útil para pescar rápido qué precios quedaron atrasados, sobre todo
+        con la inflación moviéndose seguido. Solo aparecen los artículos que tienen
+        ese % cargado en el Excel.
+      </p>
+      <div class="tabla-wrap">
+        <table id="tabla-margen-esperado">
+          <thead><tr><th>Artículo</th><th>Cant. vendida</th><th>Margen real</th><th>Margen objetivo</th><th>Diferencia</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="tarjeta tarjeta-ancha">
       <h2>Evolución de costo y precio por artículo</h2>
       <div class="campo campo-flex" style="max-width:420px;">
         <label for="filtro-articulo-evolucion">Elegí un artículo</label>
         <select id="filtro-articulo-evolucion"><option value="">— Seleccionar —</option></select>
       </div>
+      <div class="chart-wrap"><canvas id="chart-evolucion"></canvas></div>
       <div class="tabla-wrap">
         <table id="tabla-evolucion">
           <thead><tr><th>Mes</th><th>Costo unitario</th><th>Precio venta promedio</th><th>Margen</th></tr></thead>
@@ -140,6 +161,7 @@
 
 <script src="js/store.js"></script>
 <script src="js/quote.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="js/informes.js"></script>
 
 <script>

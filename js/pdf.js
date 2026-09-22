@@ -163,13 +163,16 @@
   /**
    * Arma la "lista de compras": las mismas líneas del presupuesto, pero
    * agrupadas por proveedor (para saber a quién comprarle cada cosa) y
-   * ordenadas alfabéticamente dentro de cada grupo. No es un documento
-   * para el cliente -- no muestra precios de venta, solo qué comprar y
-   * cuánto. El grupo "Sin proveedor asignado" (si hay) siempre va al final.
+   * ordenadas alfabéticamente dentro de cada grupo. Es un documento de uso
+   * interno (no para el cliente): muestra costo, no precio de venta.
+   * `obtenerCosto(articulo)` es una función que devuelve el costo unitario
+   * vigente de ese artículo a la fecha del presupuesto (o null si no hay
+   * dato). El grupo "Sin proveedor asignado" (si hay) siempre va al final.
    */
-  function construirPDFCompras(presupuesto, mapaProveedores, normalizar) {
+  function construirPDFCompras(presupuesto, mapaProveedores, normalizar, obtenerCosto) {
     const jsPDF = window.jspdf.jsPDF;
     const formatoFecha = window.Quote.formatoFecha;
+    const formatoMoneda = window.Quote.formatoMoneda;
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const margenIzq = 40;
     let y = 50;
@@ -190,12 +193,18 @@
     y += 15;
     doc.setTextColor(0);
 
-    // Agrupar por proveedor
+    // Agrupar por proveedor, calculando costo unitario y costo total de cada línea
     const grupos = {};
+    let totalGeneral = 0;
+    let totalGeneralCompleto = true; // se pone en false si falta el costo de algún artículo
     presupuesto.lineas.forEach(function (l) {
       const proveedor = mapaProveedores[normalizar(l.articulo)] || SIN_PROVEEDOR;
+      const costoUnitario = obtenerCosto ? obtenerCosto(l.articulo) : null;
+      const costoTotal = costoUnitario === null ? null : costoUnitario * l.cantidad;
+      if (costoTotal === null) totalGeneralCompleto = false;
+      else totalGeneral += costoTotal;
       if (!grupos[proveedor]) grupos[proveedor] = [];
-      grupos[proveedor].push(l);
+      grupos[proveedor].push(Object.assign({}, l, { costoUnitario: costoUnitario, costoTotal: costoTotal }));
     });
 
     // Proveedores en orden alfabético, con "Sin proveedor asignado" siempre al final
@@ -208,9 +217,11 @@
       const items = grupos[proveedor].slice().sort(function (a, b) {
         return a.articulo.localeCompare(b.articulo, 'es', { sensitivity: 'base' });
       });
+      const subtotalProveedor = items.reduce(function (acc, l) { return acc + (l.costoTotal || 0); }, 0);
+      const subtotalCompleto = items.every(function (l) { return l.costoTotal !== null; });
 
       // Si no entra el título del proveedor + al menos una fila, saltar de página
-      if (y > 760) { doc.addPage(); y = 50; }
+      if (y > 740) { doc.addPage(); y = 50; }
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
@@ -221,17 +232,55 @@
 
       doc.autoTable({
         startY: y,
-        head: [['Producto', 'Cantidad']],
-        body: items.map(function (l) { return [l.articulo, String(l.cantidad)]; }),
+        head: [['Producto', 'Cantidad', 'Costo unit.', 'Costo total']],
+        body: items.map(function (l) {
+          return [
+            l.articulo,
+            String(l.cantidad),
+            l.costoUnitario === null ? '—' : formatoMoneda(l.costoUnitario),
+            l.costoTotal === null ? '—' : formatoMoneda(l.costoTotal),
+          ];
+        }),
         margin: { left: margenIzq, right: 40 },
         styles: { font: 'helvetica', fontSize: 9, cellPadding: 5, textColor: [0, 0, 0] },
         headStyles: { fillColor: [230, 230, 230], textColor: [0, 0, 0], fontStyle: 'bold' },
         alternateRowStyles: { fillColor: [245, 247, 246], textColor: [0, 0, 0] },
-        columnStyles: { 1: { halign: 'center', cellWidth: 80 } },
+        columnStyles: {
+          1: { halign: 'center', cellWidth: 60 },
+          2: { halign: 'right', cellWidth: 75 },
+          3: { halign: 'right', cellWidth: 75 },
+        },
       });
 
-      y = doc.lastAutoTable.finalY + 22;
+      y = doc.lastAutoTable.finalY + 4;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(
+        'Subtotal ' + proveedor + ': ' + formatoMoneda(subtotalProveedor) + (subtotalCompleto ? '' : ' (incompleto, falta el costo de algún artículo)'),
+        margenIzq, y + 12, { align: 'left' }
+      );
+      doc.setFont('helvetica', 'normal');
+      y += 28;
     });
+
+    if (y > 740) { doc.addPage(); y = 50; }
+    doc.setDrawColor(210);
+    doc.line(margenIzq, y, 555, y);
+    y += 20;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text(
+      'TOTAL ESTIMADO A COMPRAR: ' + formatoMoneda(totalGeneral) + (totalGeneralCompleto ? '' : ' (incompleto)'),
+      margenIzq, y
+    );
+    if (!totalGeneralCompleto) {
+      y += 16;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(140);
+      doc.text('Algunos artículos no tienen costo cargado todavía y no están sumados en este total.', margenIzq, y);
+      doc.setTextColor(0);
+    }
 
     return doc;
   }
