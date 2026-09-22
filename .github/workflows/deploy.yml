@@ -1,0 +1,60 @@
+# Respaldo semanal automático de Firestore
+# -----------------------------------------------------------------------
+# Qué hace, en criollo: todos los lunes a la madrugada, se conecta solo a
+# la base de datos (Firestore), guarda una copia completa de todo
+# (presupuestos, clientes, lista de precios, proveedores, historial de
+# costos) en un archivo .json dentro de la carpeta backups/, y lo sube al
+# repositorio como un commit nuevo. Se van guardando los últimos 12
+# (~3 meses) para no llenar el repositorio de archivos viejos.
+#
+# Si alguna vez hace falta restaurar: bajate el .json más reciente de la
+# carpeta backups/ y usalo con el botón "Importar copia completa" de la
+# app (pestaña Configuración) -- es el mismo formato.
+#
+# Requiere un secreto configurado una única vez: FIREBASE_SERVICE_ACCOUNT
+# (ver instrucciones aparte para generarlo y cargarlo).
+# -----------------------------------------------------------------------
+
+name: Respaldo semanal de Firestore
+
+on:
+  schedule:
+    # Todos los lunes 06:00 UTC (03:00 hora de Argentina)
+    - cron: '0 6 * * 1'
+  workflow_dispatch: # permite tocar "Run workflow" a mano si hiciera falta
+
+permissions:
+  contents: write
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar firebase-admin
+        run: npm install firebase-admin@12 --no-save
+
+      - name: Hacer el backup
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/backup-firestore.js
+
+      - name: Borrar backups de más de 12 semanas atrás
+        run: |
+          cd backups
+          ls -1 backup-*.json 2>/dev/null | sort | head -n -12 | xargs -r rm -v
+
+      - name: Subir el backup nuevo al repositorio
+        run: |
+          git config user.name "Respaldo automático"
+          git config user.email "actions@github.com"
+          git add backups/
+          git diff --staged --quiet || git commit -m "Respaldo automático semanal $(date -u +%Y-%m-%d)"
+          git push
