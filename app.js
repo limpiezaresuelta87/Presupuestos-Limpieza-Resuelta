@@ -18,6 +18,7 @@
     listaPrecios: null,
     config: null,
     carrito: [],
+    seleccionParaCompra: new Set(), // números tildados en Historial para la lista de compras combinada
     presupuestoAbiertoNumero: null,
     // Si no es null, el carrito activo es una EDICIÓN de un presupuesto ya
     // guardado: { numeroOriginal, numeroBase }. Al guardar se crea una
@@ -29,6 +30,8 @@
     // Si está en true, el panel de Historial muestra la papelera en vez del
     // historial activo.
     verPapelera: false,
+    // Texto tipeado en el buscador de Historial (filtra por cliente o número).
+    filtroHistorial: '',
   };
 
   const $ = function (sel, ctx) { return (ctx || document).querySelector(sel); };
@@ -307,11 +310,11 @@
     estadoApp.carrito.forEach(function (linea) {
       const precioEditado = !!linea.editadoManualmente;
       const esArticuloFueraDeLista = !!linea.esManual;
+      // La columna de tipo de precio solo se completa cuando el precio
+      // aplicado es el de pack; para unitario o manual queda en blanco.
       const etiquetaTipo = linea.tipoPrecio === 'pack'
         ? ('Pack (≥' + linea.cantidadPack + 'u)')
-        : (linea.tipoPrecio === 'manual'
-          ? (esArticuloFueraDeLista ? 'Manual (fuera de lista)' : 'Manual')
-          : 'Unitario');
+        : '';
 
       const celdaPrecio = crearElemento('td', { class: 'col-precio' }, [
         crearElemento('input', {
@@ -346,7 +349,9 @@
           }),
         ]),
         crearElemento('td', { class: 'col-tipo' }, [
-          crearElemento('span', { class: 'badge badge-' + linea.tipoPrecio }, [etiquetaTipo]),
+          etiquetaTipo
+            ? crearElemento('span', { class: 'badge badge-' + linea.tipoPrecio }, [etiquetaTipo])
+            : document.createTextNode(''),
         ]),
         celdaPrecio,
         crearElemento('td', { class: 'col-subtotal' }, [Quote.formatoMoneda(linea.importe)]),
@@ -373,61 +378,97 @@
   // Guardar presupuesto + generar PDF
   // ---------------------------------------------------------------------
   // ---------------------------------------------------------------------
-  // Selector de cliente: desplegable poblado desde Store.obtenerClientes(),
-  // con una opción para dar de alta un cliente nuevo (se guarda en
-  // Firestore para que las 3 PCs lo vean de inmediato).
+  // Selector de cliente: buscador con autocompletado (igual que el de
+  // productos) contra Store.obtenerClientes(). A medida que el negocio
+  // crezca y haya muchos clientes, escribir y filtrar es mucho más rápido
+  // que scrollear un desplegable. Si lo que se tipea no coincide con
+  // ningún cliente existente, aparece la opción de darlo de alta -- así
+  // siempre se termina eligiendo un nombre de la lista (mismo formato,
+  // en mayúscula) en vez de texto libre, para que las estadísticas y los
+  // informes agrupen bien por cliente.
   // ---------------------------------------------------------------------
-  function renderOpcionesCliente(seleccionado) {
-    const select = $('#input-cliente-nombre');
-    const actual = seleccionado !== undefined ? seleccionado : select.value;
-    select.innerHTML = '';
-    select.appendChild(crearElemento('option', { value: '' }, ['— Seleccionar cliente —']));
-    Store.obtenerClientes().forEach(function (nombre) {
-      select.appendChild(crearElemento('option', { value: nombre }, [nombre]));
-    });
-    select.appendChild(crearElemento('option', { value: '__nuevo__' }, ['+ Agregar cliente nuevo']));
-    // Si el cliente actual (por ejemplo al editar un presupuesto viejo) no
-    // está en la lista, lo agregamos como opción temporal para que se vea
-    // seleccionado, sin guardarlo en la base hasta que se use de nuevo.
-    if (actual && actual !== '__nuevo__' && Store.obtenerClientes().indexOf(actual) === -1) {
-      const opcionTemporal = crearElemento('option', { value: actual }, [actual]);
-      select.insertBefore(opcionTemporal, select.lastChild);
+  function normalizarNombreCliente(nombre) {
+    return String(nombre || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  }
+
+  function establecerCliente(nombre) {
+    $('#input-cliente-nombre').value = nombre || '';
+    $('#resultados-busqueda-cliente').classList.remove('visible');
+    // Autocompleta el contacto guardado de este cliente, salvo que ya
+    // haya algo tipeado en ese campo (por ejemplo, al editar un
+    // presupuesto viejo, donde el contacto se pisa a propósito justo
+    // después con el que tenía ese presupuesto en su momento).
+    const campoContacto = $('#input-cliente-contacto');
+    if (nombre && campoContacto && !campoContacto.value.trim()) {
+      const contactoGuardado = Store.obtenerContactoCliente(nombre);
+      if (contactoGuardado) campoContacto.value = contactoGuardado;
     }
-    select.value = actual || '';
   }
 
   function initSelectorCliente() {
-    renderOpcionesCliente('');
+    const input = $('#input-cliente-nombre');
+    const resultados = $('#resultados-busqueda-cliente');
 
-    $('#input-cliente-nombre').addEventListener('change', function (e) {
-      if (e.target.value === '__nuevo__') {
-        $('#campo-cliente-nuevo').style.display = '';
-        $('#input-cliente-nuevo').value = '';
-        $('#input-cliente-nuevo').focus();
-      } else {
-        $('#campo-cliente-nuevo').style.display = 'none';
-      }
-    });
+    function actualizarResultados() {
+      const consulta = input.value.trim();
+      resultados.innerHTML = '';
+      if (!consulta) { resultados.classList.remove('visible'); return; }
 
-    function confirmarClienteNuevo() {
-      const nombre = $('#input-cliente-nuevo').value.trim();
-      if (!nombre) {
-        mostrarAviso('Escribí el nombre del cliente nuevo.', true);
-        return;
+      const consultaNorm = Pricelist.normalizar(consulta);
+      const clientes = Store.obtenerClientes();
+      const coincidencias = clientes.filter(function (c) { return Pricelist.normalizar(c).indexOf(consultaNorm) !== -1; });
+      const normalizado = normalizarNombreCliente(consulta);
+      const yaExiste = clientes.indexOf(normalizado) !== -1;
+
+      coincidencias.forEach(function (nombre) {
+        const li = crearElemento('li', {
+          class: 'resultado-item', tabindex: '0',
+          onclick: function () { establecerCliente(nombre); },
+          onkeydown: function (e) { if (e.key === 'Enter') establecerCliente(nombre); },
+        }, [crearElemento('span', { class: 'resultado-nombre' }, [nombre])]);
+        resultados.appendChild(li);
+      });
+
+      if (!yaExiste) {
+        const li = crearElemento('li', {
+          class: 'resultado-item resultado-agregar', tabindex: '0',
+          onclick: function () { agregarYSeleccionar(consulta); },
+          onkeydown: function (e) { if (e.key === 'Enter') agregarYSeleccionar(consulta); },
+        }, ['+ Agregar "' + normalizado + '" como cliente nuevo']);
+        resultados.appendChild(li);
+      } else if (coincidencias.length === 0) {
+        resultados.appendChild(crearElemento('li', { class: 'resultado-vacio' }, ['Sin coincidencias.']));
       }
-      const nombreGuardado = Store.agregarCliente(nombre);
-      renderOpcionesCliente(nombreGuardado);
-      $('#campo-cliente-nuevo').style.display = 'none';
+
+      resultados.classList.add('visible');
+    }
+
+    function agregarYSeleccionar(nombreTipeado) {
+      const nombreGuardado = Store.agregarCliente(nombreTipeado);
+      if (!nombreGuardado) return;
+      establecerCliente(nombreGuardado);
       mostrarAviso('Cliente "' + nombreGuardado + '" agregado.');
     }
 
-    $('#btn-cliente-nuevo-confirmar').addEventListener('click', confirmarClienteNuevo);
-    $('#input-cliente-nuevo').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); confirmarClienteNuevo(); }
+    input.addEventListener('input', debounce(actualizarResultados, 120));
+    input.addEventListener('focus', actualizarResultados);
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('.buscador-wrap')) resultados.classList.remove('visible');
     });
-    $('#btn-cliente-nuevo-cancelar').addEventListener('click', function () {
-      $('#campo-cliente-nuevo').style.display = 'none';
-      $('#input-cliente-nombre').value = '';
+
+    $('#btn-guardar-contacto-cliente').addEventListener('click', function () {
+      const nombreCliente = normalizarNombreCliente(input.value);
+      if (!nombreCliente || Store.obtenerClientes().indexOf(nombreCliente) === -1) {
+        mostrarAviso('Elegí primero un cliente de la lista antes de guardarle un contacto.', true);
+        return;
+      }
+      const contacto = $('#input-cliente-contacto').value.trim();
+      Store.guardarContactoCliente(nombreCliente, contacto);
+      mostrarAviso(
+        contacto
+          ? 'Guardado como contacto habitual de ' + nombreCliente + '.'
+          : 'Se borró el contacto habitual de ' + nombreCliente + '.'
+      );
     });
   }
 
@@ -441,6 +482,13 @@
     // confirmación de la nube (para que dos PCs nunca se lleven el mismo
     // número si guardan al mismo tiempo). Todo lo demás sigue igual.
     $('#btn-guardar-presupuesto').addEventListener('click', function () {
+      if (estadoApp.carrito.length === 0) {
+        mostrarAviso('Agregá al menos un producto antes de generar el presupuesto.', true);
+        return;
+      }
+      // Se pregunta ANTES de armar el presupuesto: así, si contesta que no,
+      // no se gasta un número correlativo por nada.
+      if (!window.confirm('¿Desea guardar el presupuesto?')) return;
       armarPresupuestoDesdeFormulario({}).then(function (presupuesto) {
         if (!presupuesto) return;
         Store.guardarPresupuesto(presupuesto);
@@ -456,7 +504,19 @@
       });
     });
 
+    $('#btn-lista-compras').addEventListener('click', function () {
+      armarPresupuestoDesdeFormulario({ soloPreview: true }).then(function (presupuesto) {
+        if (!presupuesto) return;
+        descargarListaCompras(presupuesto);
+      });
+    });
+
     $('#btn-descargar-pdf').addEventListener('click', function () {
+      if (estadoApp.carrito.length === 0) {
+        mostrarAviso('Agregá al menos un producto antes de generar el presupuesto.', true);
+        return;
+      }
+      if (!window.confirm('¿Desea guardar el presupuesto?')) return;
       armarPresupuestoDesdeFormulario({}).then(function (presupuesto) {
         if (!presupuesto) return;
         Store.guardarPresupuesto(presupuesto);
@@ -498,9 +558,10 @@
       mostrarAviso('Agregá al menos un producto antes de generar el presupuesto.', true);
       return Promise.resolve(null);
     }
-    const nombreCliente = $('#input-cliente-nombre').value.trim();
-    if (!nombreCliente || nombreCliente === '__nuevo__') {
-      mostrarAviso('Elegí un cliente (o agregá uno nuevo) antes de continuar.', true);
+    const nombreClienteTipeado = $('#input-cliente-nombre').value.trim();
+    const nombreCliente = normalizarNombreCliente(nombreClienteTipeado);
+    if (!nombreClienteTipeado || Store.obtenerClientes().indexOf(nombreCliente) === -1) {
+      mostrarAviso('Elegí un cliente de la lista (o agregalo con la opción "+ Agregar…") antes de continuar.', true);
       return Promise.resolve(null);
     }
     const totales = renderTotales();
@@ -557,7 +618,7 @@
     ocultarBannerEdicion();
     $('#form-manual').style.display = 'none';
     $('#campo-cliente-nuevo').style.display = 'none';
-    renderOpcionesCliente('');
+    establecerCliente('');
     $('#input-cliente-contacto').value = '';
     $('#input-observaciones').value = '';
     const config = Store.obtenerConfig();
@@ -580,7 +641,7 @@
     estadoApp.edicion = { numeroOriginal: presupuesto.numero, numeroBase: numeroBase };
     estadoApp.carrito = JSON.parse(JSON.stringify(presupuesto.lineas));
 
-    renderOpcionesCliente(presupuesto.cliente.nombre || '');
+    establecerCliente(presupuesto.cliente.nombre || '');
     $('#input-cliente-contacto').value = presupuesto.cliente.contacto || '';
     $('#input-descuento').value = String(presupuesto.descuentoPct || 0);
     $('#input-validez').value = String(presupuesto.validezDias || Store.obtenerConfig().validezDiasPorDefecto);
@@ -592,6 +653,37 @@
     $('#detalle-historial').classList.remove('visible');
     cambiarPestana('nuevo');
     mostrarAviso('Editando ' + presupuesto.numero + '. Al guardar se crea una revisión nueva, sin pisar el original.');
+  }
+
+  /**
+   * Duplica un presupuesto viejo como uno NUEVO (no una revisión): copia
+   * cliente y productos/cantidades, pero recalcula los precios contra la
+   * lista vigente -- a diferencia de "Editar", que arranca a propósito con
+   * los precios congelados tal cual estaban. Los artículos manuales (fuera
+   * de la lista) se copian con el mismo precio, porque no hay de dónde
+   * recalcularlos.
+   */
+  function duplicarPresupuesto(numero) {
+    const original = Store.buscarPresupuesto(numero);
+    if (!original) return;
+
+    estadoApp.edicion = null;
+    estadoApp.carrito = JSON.parse(JSON.stringify(original.lineas)).map(function (l) {
+      return Quote.recalcularLinea(l, estadoApp.listaPrecios);
+    });
+
+    establecerCliente(original.cliente.nombre || '');
+    $('#input-cliente-contacto').value = original.cliente.contacto || '';
+    $('#input-descuento').value = String(original.descuentoPct || 0);
+    $('#input-condiciones').value = original.condicionesPago || Store.obtenerConfig().condicionesPagoPorDefecto;
+    $('#input-validez').value = String(original.validezDias || Store.obtenerConfig().validezDiasPorDefecto);
+    $('#input-observaciones').value = original.observaciones || '';
+
+    renderCarrito();
+    ocultarBannerEdicion();
+    $('#detalle-historial').classList.remove('visible');
+    cambiarPestana('nuevo');
+    mostrarAviso('Presupuesto duplicado desde ' + numero + '. Los precios se recalcularon con la lista vigente — revisalos antes de guardar.');
   }
 
   function mostrarBannerEdicion() {
@@ -625,12 +717,33 @@
     doc.save(PdfGen.nombreArchivoPDF(presupuesto));
   }
 
+  function descargarListaCompras(presupuesto) {
+    if (!presupuesto.lineas || presupuesto.lineas.length === 0) {
+      mostrarAviso('Agregá al menos un producto antes de generar la lista de compras.', true);
+      return;
+    }
+    const mapaProveedores = Store.obtenerMapaProveedores();
+    const obtenerCosto = function (articulo) { return Store.obtenerCostoDeArticulo(articulo, presupuesto.fecha); };
+    const doc = PdfGen.construirPDFCompras(presupuesto, mapaProveedores, Pricelist.normalizar, obtenerCosto);
+    doc.save(PdfGen.nombreArchivoListaCompras(presupuesto));
+  }
+
   // ---------------------------------------------------------------------
   // Historial
   // ---------------------------------------------------------------------
   function renderHistorial() {
     const tbody = $('#tabla-historial tbody');
-    const historial = estadoApp.verPapelera ? Store.obtenerPapelera() : Store.obtenerHistorial();
+    let historial = estadoApp.verPapelera ? Store.obtenerPapelera() : Store.obtenerHistorial();
+
+    const consulta = (estadoApp.filtroHistorial || '').trim();
+    if (consulta) {
+      const consultaNorm = Pricelist.normalizar(consulta);
+      historial = historial.filter(function (p) {
+        return Pricelist.normalizar(p.numero).indexOf(consultaNorm) !== -1 ||
+          Pricelist.normalizar(p.cliente.nombre).indexOf(consultaNorm) !== -1;
+      });
+    }
+
     tbody.innerHTML = '';
 
     const btnPapelera = $('#btn-toggle-papelera');
@@ -645,8 +758,12 @@
     if (historial.length === 0) {
       tbody.appendChild(
         crearElemento('tr', {}, [crearElemento('td', {
-          colspan: '6', class: 'vacio',
-        }, [estadoApp.verPapelera ? 'La papelera está vacía.' : 'Todavía no generaste presupuestos.'])])
+          colspan: '7', class: 'vacio',
+        }, [
+          consulta
+            ? 'Ningún presupuesto coincide con "' + consulta + '".'
+            : (estadoApp.verPapelera ? 'La papelera está vacía.' : 'Todavía no generaste presupuestos.'),
+        ])])
       );
       return;
     }
@@ -667,6 +784,7 @@
         : [
             crearElemento('button', { class: 'btn-mini', onclick: function () { verDetalleHistorial(p.numero); } }, ['Ver']),
             crearElemento('button', { class: 'btn-mini', onclick: function () { editarPresupuesto(p.numero); } }, ['Editar']),
+            crearElemento('button', { class: 'btn-mini', onclick: function () { duplicarPresupuesto(p.numero); } }, ['Duplicar']),
             crearElemento('button', { class: 'btn-mini', onclick: function () { recalcularPresupuestoDirecto(p.numero); } }, ['Recalcular']),
             crearElemento('button', { class: 'btn-mini', onclick: function () { descargarPDF(p); } }, ['PDF']),
             crearElemento('button', {
@@ -675,7 +793,23 @@
             }, ['Eliminar']),
           ];
 
+      const celdaCheck = estadoApp.verPapelera
+        ? crearElemento('td', {}, [])
+        : (function () {
+            const check = crearElemento('input', {
+              type: 'checkbox',
+              onchange: function (e) {
+                if (e.target.checked) estadoApp.seleccionParaCompra.add(p.numero);
+                else estadoApp.seleccionParaCompra.delete(p.numero);
+                actualizarBotonListaCombinada();
+              },
+            });
+            check.checked = estadoApp.seleccionParaCompra.has(p.numero);
+            return crearElemento('td', {}, [check]);
+          })();
+
       const tr = crearElemento('tr', {}, [
+        celdaCheck,
         crearElemento('td', {}, [p.numero]),
         crearElemento('td', {}, [Quote.formatoFecha(p.fecha)]),
         crearElemento('td', {}, [p.cliente.nombre]),
@@ -685,6 +819,55 @@
       ]);
       tbody.appendChild(tr);
     });
+    actualizarBotonListaCombinada();
+  }
+
+  /** Actualiza el texto/estado del botón de lista de compras combinada según cuántos hay tildados. */
+  function actualizarBotonListaCombinada() {
+    const btn = $('#btn-lista-compras-combinada');
+    if (!btn) return;
+    const cantidad = estadoApp.seleccionParaCompra.size;
+    btn.disabled = cantidad === 0;
+    btn.textContent = cantidad === 0
+      ? 'Lista de compras combinada'
+      : 'Lista de compras combinada (' + cantidad + ')';
+  }
+
+  /** Junta las líneas de varios presupuestos en una sola lista, sumando cantidades de un mismo artículo. */
+  function combinarLineasParaCompra(presupuestos) {
+    const acumulado = {};
+    presupuestos.forEach(function (p) {
+      p.lineas.forEach(function (l) {
+        if (!acumulado[l.articulo]) acumulado[l.articulo] = { articulo: l.articulo, cantidad: 0 };
+        acumulado[l.articulo].cantidad += l.cantidad;
+      });
+    });
+    return Object.keys(acumulado)
+      .sort(function (a, b) { return a.localeCompare(b, 'es', { sensitivity: 'base' }); })
+      .map(function (k) { return acumulado[k]; });
+  }
+
+  function generarListaCompraCombinada() {
+    const numeros = Array.from(estadoApp.seleccionParaCompra);
+    if (numeros.length === 0) return;
+    const presupuestos = numeros.map(function (n) { return Store.buscarPresupuesto(n); }).filter(Boolean);
+    if (presupuestos.length === 0) {
+      mostrarAviso('No se encontraron los presupuestos tildados.', true);
+      return;
+    }
+    const clientesIncluidos = Array.from(new Set(presupuestos.map(function (p) { return p.cliente.nombre; })));
+    const presupuestoCombinado = {
+      // No es un presupuesto real (no se guarda en el historial) -- es solo
+      // un objeto de paso para reusar el mismo generador de PDF. El costo
+      // de cada línea se busca con la fecha de HOY (no la de cada pedido
+      // original), porque lo que importa es qué comprar y a qué costo
+      // vigente comprarlo, no el costo que regía cuando se armó cada uno.
+      numero: presupuestos.map(function (p) { return p.numero; }).join(', '),
+      cliente: { nombre: clientesIncluidos.join(', ') },
+      fecha: new Date().toISOString(),
+      lineas: combinarLineasParaCompra(presupuestos),
+    };
+    descargarListaCompras(presupuestoCombinado);
   }
 
   /**
@@ -751,7 +934,7 @@
         crearElemento('tr', { class: l.noEncontradoEnListaVigente ? 'fila-alerta' : '' }, [
           crearElemento('td', {}, [l.articulo]),
           crearElemento('td', {}, [String(l.cantidad)]),
-          crearElemento('td', {}, [l.tipoPrecio === 'pack' ? 'Pack' : (l.tipoPrecio === 'manual' ? 'Manual' : 'Unitario')]),
+          crearElemento('td', {}, [l.tipoPrecio === 'pack' ? 'Pack' : '']),
           crearElemento('td', {}, [Quote.formatoMoneda(l.precioUnitarioAplicado)]),
           crearElemento('td', {}, [Quote.formatoMoneda(l.importe)]),
         ])
@@ -761,7 +944,9 @@
 
     $('#btn-recalcular').onclick = function () { recalcularPresupuestoDirecto(presupuesto.numero); };
     $('#btn-detalle-editar').onclick = function () { editarPresupuesto(presupuesto.numero); };
+    $('#btn-detalle-duplicar').onclick = function () { duplicarPresupuesto(presupuesto.numero); };
     $('#btn-detalle-pdf').onclick = function () { descargarPDF(presupuesto); };
+    $('#btn-detalle-lista-compras').onclick = function () { descargarListaCompras(presupuesto); };
     $('#btn-detalle-eliminar').onclick = function () { moverPresupuestoAPapelera(presupuesto.numero); };
     $('#btn-detalle-cerrar').onclick = function () { detalle.classList.remove('visible'); };
   }
@@ -769,20 +954,34 @@
   /** Recalcula un presupuesto del historial con la lista de precios vigente,
    * sin necesidad de tenerlo abierto en el detalle primero (se puede llamar
    * directo desde la fila de la tabla). */
+  /**
+   * "Recalcular con lista vigente": ANTES pisaba el presupuesto original en
+   * el mismo número, lo cual iba en contra de la regla de oro de la app
+   * (nunca modificar un presupuesto que ya se le pudo haber entregado al
+   * cliente). Ahora crea una REVISIÓN nueva, igual que cuando se edita a
+   * mano: el original queda intacto, con sus precios tal cual estaban, y
+   * se agrega un "-R" nuevo con los importes recalculados.
+   */
   function recalcularPresupuestoDirecto(numero) {
-    const presupuesto = Store.buscarPresupuesto(numero);
-    if (!presupuesto) return;
-    const nuevasLineas = presupuesto.lineas.map(function (l) { return Quote.recalcularLinea(l, estadoApp.listaPrecios); });
-    const totales = Quote.calcularTotales(nuevasLineas, presupuesto.descuentoPct);
-    const actualizado = Object.assign({}, presupuesto, totales, {
+    const original = Store.buscarPresupuesto(numero);
+    if (!original) return;
+    const numeroBase = original.numeroBase || numero.split('-R')[0];
+    const nuevoNumero = siguienteNumeroRevision(numeroBase);
+    const nuevasLineas = original.lineas.map(function (l) { return Quote.recalcularLinea(l, estadoApp.listaPrecios); });
+    const totales = Quote.calcularTotales(nuevasLineas, original.descuentoPct);
+    const revision = Object.assign({}, original, totales, {
+      numero: nuevoNumero,
+      numeroBase: numeroBase,
+      revisionDe: numeroBase,
+      fecha: new Date().toISOString(),
       lineas: nuevasLineas,
       listaPreciosFecha: estadoApp.listaPrecios.actualizado,
-      recalculadoEl: new Date().toISOString(),
+      recalculadoDe: numero,
     });
-    Store.actualizarPresupuesto(presupuesto.numero, actualizado);
-    mostrarAviso('Presupuesto ' + presupuesto.numero + ' recalculado con la lista de precios vigente.');
+    Store.guardarPresupuesto(revision);
+    mostrarAviso('Se creó ' + nuevoNumero + ' con los precios recalculados. El original (' + numero + ') no se modificó.');
     renderHistorial();
-    if (estadoApp.presupuestoAbiertoNumero === presupuesto.numero) verDetalleHistorial(presupuesto.numero);
+    if (estadoApp.presupuestoAbiertoNumero === numero) verDetalleHistorial(nuevoNumero);
   }
 
   // ---------------------------------------------------------------------
@@ -822,19 +1021,29 @@
         if (!entrantes) {
           throw new Error('El archivo no tiene el formato esperado (tiene que ser un historial exportado desde esta misma app).');
         }
-        const existentes = Store.obtenerHistorial();
-        const numerosExistentes = {};
-        existentes.forEach(function (p) { numerosExistentes[p.numero] = true; });
-        const nuevos = entrantes.filter(function (p) { return p && p.numero && !numerosExistentes[p.numero]; });
-        const combinado = existentes.concat(nuevos).sort(function (a, b) {
-          return new Date(b.fecha) - new Date(a.fecha);
+        // Se incluye la papelera (true) para no perderla del cache local al
+        // reescribir todo el historial de una (ver guardarHistorialCompleto).
+        const existentes = Store.obtenerHistorial(true);
+        const porNumero = {};
+        existentes.forEach(function (p) { porNumero[p.numero] = p; });
+        let actualizados = 0;
+        let agregados = 0;
+        entrantes.forEach(function (p) {
+          if (!p || !p.numero) return;
+          if (porNumero[p.numero]) actualizados++; else agregados++;
+          // El que se importa PISA al que ya había con el mismo número --
+          // así sirve tanto para traer presupuestos nuevos como para
+          // corregir datos de uno ya importado antes (por ejemplo, si
+          // se corrige un archivo reconstruido a mano desde un PDF viejo).
+          porNumero[p.numero] = p;
         });
+        const combinado = Object.keys(porNumero).map(function (k) { return porNumero[k]; })
+          .sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
         Store.guardarHistorialCompleto(combinado);
         renderHistorial();
-        const yaExistian = entrantes.length - nuevos.length;
         mostrarAviso(
-          'Se importaron ' + nuevos.length + ' presupuestos nuevos' +
-          (yaExistian > 0 ? ' (' + yaExistian + ' ya estaban y se omitieron).' : '.')
+          'Importación completa: ' + agregados + ' presupuesto(s) nuevo(s)' +
+          (actualizados > 0 ? ', ' + actualizados + ' actualizado(s) (mismo número, datos reemplazados).' : '.')
         );
       } catch (err) {
         console.error(err);
@@ -853,6 +1062,12 @@
       if (file) importarHistorialDesdeArchivo(file);
       e.target.value = '';
     });
+    $('#btn-lista-compras-combinada').addEventListener('click', generarListaCompraCombinada);
+
+    $('#buscador-historial').addEventListener('input', debounce(function (e) {
+      estadoApp.filtroHistorial = e.target.value;
+      renderHistorial();
+    }, 150));
   }
 
   // ---------------------------------------------------------------------
@@ -867,8 +1082,11 @@
       exportadoEl: new Date().toISOString(),
       tipo: 'backup-completo-presupuestos',
       config: Store.obtenerConfig(),
-      historial: Store.obtenerHistorial(),
+      historial: Store.obtenerHistorial(true), // incluye papelera, para que un backup sea realmente completo
       listaPrecios: Store.obtenerListaPrecios(),
+      clientes: { nombres: Store.obtenerClientes(), contactos: Store.obtenerContactosClientes() },
+      proveedores: Store.obtenerMapaProveedores(),
+      costosHistoricos: Store.obtenerHistorialCostos(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -890,11 +1108,14 @@
           throw new Error('El archivo no parece ser una copia de seguridad de esta app.');
         }
         if (Array.isArray(data.historial)) {
-          const existentes = Store.obtenerHistorial();
-          const numerosExistentes = {};
-          existentes.forEach(function (p) { numerosExistentes[p.numero] = true; });
-          const nuevos = data.historial.filter(function (p) { return p && p.numero && !numerosExistentes[p.numero]; });
-          const combinado = existentes.concat(nuevos).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+          const existentes = Store.obtenerHistorial(true);
+          const porNumero = {};
+          existentes.forEach(function (p) { porNumero[p.numero] = p; });
+          data.historial.forEach(function (p) {
+            if (p && p.numero) porNumero[p.numero] = p; // pisa si ya existía
+          });
+          const combinado = Object.keys(porNumero).map(function (k) { return porNumero[k]; })
+            .sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
           Store.guardarHistorialCompleto(combinado);
         }
         if (data.config) {
@@ -902,6 +1123,15 @@
         }
         if (data.listaPrecios && Array.isArray(data.listaPrecios.items)) {
           Store.guardarListaPrecios(data.listaPrecios);
+        }
+        if (data.clientes) {
+          Store.restaurarClientes(data.clientes);
+        }
+        if (data.proveedores) {
+          Store.guardarMapaProveedores(data.proveedores);
+        }
+        if (Array.isArray(data.costosHistoricos)) {
+          Store.restaurarCostosHistoricos(data.costosHistoricos);
         }
         estadoApp.config = Store.obtenerConfig();
         estadoApp.listaPrecios = Store.obtenerListaPrecios() || estadoApp.listaPrecios;
@@ -975,6 +1205,64 @@
       Store.guardarConfig(config);
       mostrarAviso('Configuración guardada.');
     });
+
+    initUsuariosAutorizados();
+  }
+
+  // ---------------------------------------------------------------------
+  // Usuarios autorizados (login)
+  // ---------------------------------------------------------------------
+  function renderUsuariosAutorizados() {
+    const lista = $('#lista-usuarios-autorizados');
+    if (!lista || !window.Auth) return;
+    lista.innerHTML = '';
+    window.Auth.obtenerUsuariosAutorizados().forEach(function (email) {
+      lista.appendChild(crearElemento('li', {}, [
+        crearElemento('span', {}, [email]),
+        crearElemento('button', {
+          class: 'btn-mini btn-mini-peligro', type: 'button',
+          onclick: function () { quitarUsuario(email); },
+        }, ['Quitar']),
+      ]));
+    });
+  }
+
+  function quitarUsuario(email) {
+    const propio = window.Auth.currentUser() && window.Auth.currentUser().email === email;
+    const mensaje = propio
+      ? 'Ese es TU propio correo — si lo sacás, te vas a quedar sin acceso vos también. ¿Confirmás?'
+      : 'Sacar el acceso de ' + email + '. ¿Confirmás?';
+    if (!window.confirm(mensaje)) return;
+    window.Auth.quitarUsuarioAutorizado(email).then(function () {
+      renderUsuariosAutorizados();
+      mostrarAviso('Se sacó el acceso de ' + email + '.');
+    }).catch(function (err) {
+      mostrarAviso(err.message || 'No se pudo sacar ese correo.', true);
+    });
+  }
+
+  function initUsuariosAutorizados() {
+    renderUsuariosAutorizados();
+
+    $('#btn-agregar-usuario').addEventListener('click', function () {
+      const input = $('#input-usuario-nuevo');
+      const email = input.value.trim();
+      if (!email || email.indexOf('@') === -1) {
+        mostrarAviso('Ingresá un correo válido.', true);
+        return;
+      }
+      window.Auth.agregarUsuarioAutorizado(email).then(function () {
+        input.value = '';
+        renderUsuariosAutorizados();
+        mostrarAviso('Se agregó ' + email + '. Ya puede iniciar sesión.');
+      }).catch(function (err) {
+        mostrarAviso(err.message || 'No se pudo agregar ese correo.', true);
+      });
+    });
+
+    $('#input-usuario-nuevo').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); $('#btn-agregar-usuario').click(); }
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -1016,7 +1304,12 @@
             (resultado.filasIgnoradas ? ' (' + resultado.filasIgnoradas + ' filas ignoradas por datos incompletos).' : '.') +
             (resultado.snapshotCostos
               ? ' También se guardó el costo de ' + resultado.snapshotCostos.items.length + ' artículos para Informes.'
-              : ' (No se encontró/validó una hoja de costos en este archivo; los informes de ganancia no se actualizaron.)');
+              : ' (No se encontró/validó una hoja de costos en este archivo; los informes de ganancia no se actualizaron.)') +
+            (resultado.sinProveedor && resultado.sinProveedor.length > 0
+              ? ' ⚠ ' + resultado.sinProveedor.length + ' artículo(s) sin proveedor detectado (nombre distinto entre hojas): ' +
+                resultado.sinProveedor.slice(0, 8).join(', ') + (resultado.sinProveedor.length > 8 ? '…' : '') +
+                '. Van a aparecer como "Sin proveedor asignado" en la lista de compras hasta que unifiques el nombre en el Excel.'
+              : '');
           mostrarAviso('Lista de precios actualizada correctamente.');
         })
         .catch(function (err) {
@@ -1049,6 +1342,42 @@
       if (file) procesarArchivo(file);
     });
     zona.addEventListener('click', function () { input.click(); });
+  }
+
+  // ---------------------------------------------------------------------
+  // Mayúsculas automáticas: todo el texto que termina en el presupuesto
+  // (cliente, producto manual, condiciones, observaciones, datos de la
+  // empresa) se escribe siempre en mayúsculas, como el resto de la lista
+  // de precios. No se aplica a los buscadores (no guardan datos, y la
+  // búsqueda ya ignora mayúsculas/minúsculas) ni a los campos de email.
+  // ---------------------------------------------------------------------
+  const CAMPOS_MAYUSCULAS = [
+    'input-cliente-nombre',
+    'input-cliente-contacto',
+    'manual-nombre',
+    'input-condiciones',
+    'input-observaciones',
+    'cfg-nombre',
+    'cfg-direccion',
+    'cfg-telefono',
+    'cfg-cuit',
+    'cfg-condiciones',
+    'cfg-prefijo',
+  ];
+
+  function initMayusculasAutomaticas() {
+    CAMPOS_MAYUSCULAS.forEach(function (id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', function () {
+        const inicio = el.selectionStart;
+        const fin = el.selectionEnd;
+        el.value = el.value.toUpperCase();
+        // Restaura la posición del cursor (toUpperCase no cambia el largo
+        // del texto en español, así que la posición se mantiene exacta).
+        if (inicio !== null && fin !== null) el.setSelectionRange(inicio, fin);
+      });
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -1092,6 +1421,7 @@
         initHistorialHerramientas();
         initTogglePapelera();
         initBackupCompleto();
+        initMayusculasAutomaticas();
         limpiarFormularioNuevoPresupuesto();
         renderListaPreciosInfo();
       });

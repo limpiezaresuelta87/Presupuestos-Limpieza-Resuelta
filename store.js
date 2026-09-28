@@ -106,6 +106,7 @@
     listaPrecios: null,
     costosHistoricos: [],
     clientes: [],
+    contactosClientes: {}, // { nombreCliente: contacto }
     proveedores: {}, // { articuloNormalizado: nombreProveedor }
   };
 
@@ -167,8 +168,10 @@
     });
 
     DOC_CLIENTES.onSnapshot(function (snap) {
-      const nombres = snap.exists && Array.isArray(snap.data().nombres) ? snap.data().nombres : [];
+      const datos = snap.exists ? snap.data() : {};
+      const nombres = Array.isArray(datos.nombres) ? datos.nombres : [];
       cache.clientes = nombres.slice().sort(function (a, b) { return a.localeCompare(b, 'es'); });
+      cache.contactosClientes = datos.contactos && typeof datos.contactos === 'object' ? datos.contactos : {};
       fuentesListas.clientes = true;
       chequearListo();
     }, function (err) {
@@ -233,23 +236,69 @@
     },
 
     /**
-     * Asigna el próximo número de presupuesto de forma ATÓMICA: si dos PCs
-     * lo piden al mismo tiempo, Firestore garantiza que cada una se lleve
-     * un número distinto (reintenta solo si hay choque). Por eso es la
-     * única función de Store que devuelve una Promise en vez del valor
-     * directo -- ver los 2 puntos en app.js que hacen .then() con esto.
+     * Asigna el próximo número de presupuesto.
+     *
+     * ANTES: usaba una transacción de Firestore (db.runTransaction), que
+     * es ATÓMICA pero tiene un problema serio: las transacciones de
+     * Firestore necesitan ida y vuelta real al servidor SIEMPRE, incluso
+     * con la persistencia offline activada -- no se resuelven nunca desde
+     * el caché local. Resultado: sin conexión, esta función se quedaba
+     * esperando para siempre, sin error visible, y el presupuesto nunca
+     * se guardaba. Esto es lo que estaba pasando cuando se perdió un
+     * presupuesto armado sin internet.
+     *
+     * AHORA: calcula el número contra el caché local (cache.historial y
+     * cache.config), que ya se mantiene al día en tiempo real -- incluso
+     * offline, gracias a la persistencia de Firestore (enablePersistence
+     * en firebase-init.js). Es instantáneo y funciona con o sin conexión.
+     *
+     * A PRUEBA DE CHOQUES: antes de entregar un número, verifica contra el
+     * historial real que no esté ya usado (no confía ciegamente en el
+     * contador guardado). Si lo está, lo salta solo y prueba el siguiente.
+     *
+     * Trade-off consciente: al dejar de ser atómico, si DOS dispositivos
+     * estuvieran generando un presupuesto nuevo sin conexión en el mismo
+     * instante, en teoría podrían llevarse el mismo número (algo que la
+     * transacción anterior evitaba, pero que no puede pasar cuando hay
+     * conexión: ahí el caché está al segundo). En el uso real de esta app
+     * (alguien viajando, sin señal, generalmente solo) es un riesgo muy
+     * bajo comparado con el problema que resuelve: hoy, offline, el 100%
+     * de los presupuestos se perdían.
      */
     tomarSiguienteNumero: function () {
-      return db.runTransaction(function (tx) {
-        return tx.get(DOC_CONFIG).then(function (doc) {
-          const config = completarConfig(doc.exists ? doc.data() : null);
-          const n = config.numeracion.siguienteNumero;
-          const numeroFormateado = config.numeracion.prefijo + String(n).padStart(config.numeracion.padding, '0');
-          config.numeracion.siguienteNumero = n + 1;
-          tx.set(DOC_CONFIG, config);
-          return numeroFormateado;
-        });
+      const MAX_INTENTOS = 200;
+      const config = completarConfig(cache.config);
+      let n = config.numeracion.siguienteNumero;
+      let numeroFormateado = null;
+
+      for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+        const candidato = config.numeracion.prefijo + String(n).padStart(config.numeracion.padding, '0');
+        const yaExiste = cache.historial.some(function (p) { return p.numero === candidato; });
+        if (!yaExiste) {
+          numeroFormateado = candidato;
+          break;
+        }
+        n++;
+      }
+
+      if (!numeroFormateado) {
+        return Promise.reject(new Error(
+          'No se encontró un número de presupuesto libre después de ' + MAX_INTENTOS +
+          ' intentos. Revisá la numeración en Configuración.'
+        ));
+      }
+
+      // Reserva el número: actualización optimista del caché (instantánea) +
+      // escritura en Firestore. Si no hay conexión, Firestore la encola sola
+      // y la sincroniza cuando vuelva la señal -- no hace falta esperarla.
+      cache.config = completarConfig(Object.assign({}, config, {
+        numeracion: Object.assign({}, config.numeracion, { siguienteNumero: n + 1 }),
+      }));
+      DOC_CONFIG.set(cache.config).catch(function (err) {
+        console.error('[store] No se pudo guardar el número siguiente en la nube (se sincroniza solo al volver la conexión):', err);
       });
+
+      return Promise.resolve(numeroFormateado);
     },
 
     // -------------------------------------------------------------------
@@ -419,6 +468,19 @@
       return elegido || historial[historial.length - 1];
     },
 
+    /**
+     * Costo unitario de UN artículo puntual, vigente en una fecha dada (o
+     * el más reciente disponible si no hay ninguno anterior a esa fecha).
+     * Devuelve null si no hay ningún snapshot guardado, o si ese artículo
+     * no aparece en el snapshot encontrado.
+     */
+    obtenerCostoDeArticulo: function (articulo, fechaIso) {
+      const snap = this.obtenerSnapshotCostosMasCercano(fechaIso);
+      if (!snap) return null;
+      const item = snap.items.find(function (it) { return it.articulo === articulo; });
+      return item && item.costoUnitario !== undefined ? item.costoUnitario : null;
+    },
+
     // -------------------------------------------------------------------
     // Clientes (para el desplegable del formulario de presupuesto)
     // -------------------------------------------------------------------
@@ -436,11 +498,58 @@
       if (!limpio) return null;
       if (cache.clientes.indexOf(limpio) === -1) {
         cache.clientes = cache.clientes.concat([limpio]).sort(function (a, b) { return a.localeCompare(b, 'es'); });
-        DOC_CLIENTES.set({ nombres: cache.clientes }).catch(function (err) {
+        DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
           console.error('[store] No se pudo guardar el cliente nuevo:', err);
         });
       }
       return limpio;
+    },
+
+    /** Contacto guardado de un cliente (teléfono/email/dirección habitual), o '' si no tiene. */
+    obtenerContactoCliente: function (nombre) {
+      return cache.contactosClientes[nombre] || '';
+    },
+
+    /**
+     * Guarda (o actualiza) el contacto habitual de un cliente, para que la
+     * próxima vez que se lo elija en un presupuesto nuevo se autocomplete
+     * solo, sin tener que volver a tipearlo.
+     */
+    guardarContactoCliente: function (nombre, contacto) {
+      if (!nombre) return false;
+      cache.contactosClientes = Object.assign({}, cache.contactosClientes, { [nombre]: String(contacto || '').trim() });
+      DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
+        console.error('[store] No se pudo guardar el contacto del cliente:', err);
+      });
+      return true;
+    },
+
+    /** Todos los contactos guardados, para el backup completo. */
+    obtenerContactosClientes: function () {
+      return Object.assign({}, cache.contactosClientes);
+    },
+
+    /** Reemplaza TODA la lista de clientes + contactos de una vez (usado al restaurar un backup). */
+    restaurarClientes: function (datos) {
+      const nombres = (datos && Array.isArray(datos.nombres) ? datos.nombres : []).slice()
+        .sort(function (a, b) { return a.localeCompare(b, 'es'); });
+      const contactos = (datos && datos.contactos && typeof datos.contactos === 'object') ? datos.contactos : {};
+      cache.clientes = nombres;
+      cache.contactosClientes = contactos;
+      DOC_CLIENTES.set({ nombres: nombres, contactos: contactos }).catch(function (err) {
+        console.error('[store] No se pudo restaurar la lista de clientes:', err);
+      });
+      return true;
+    },
+
+    /** Reemplaza TODO el historial de precios/costos de una vez (usado al restaurar un backup). */
+    restaurarCostosHistoricos: function (snapshots) {
+      const lista = Array.isArray(snapshots) ? snapshots.slice() : [];
+      cache.costosHistoricos = lista.sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; });
+      escribirEnLotes(COL_COSTOS, lista, function (s) { return s.fecha; }).catch(function (err) {
+        console.error('[store] No se pudo restaurar el historial de costos:', err);
+      });
+      return true;
     },
 
     // -------------------------------------------------------------------
