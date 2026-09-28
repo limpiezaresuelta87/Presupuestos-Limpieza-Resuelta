@@ -77,7 +77,7 @@
         return [
           l.articulo,
           String(l.cantidad),
-          l.tipoPrecio === 'pack' ? 'Pack' : (l.tipoPrecio === 'manual' ? 'Manual' : 'Unitario'),
+          l.tipoPrecio === 'pack' ? 'Pack' : '',
           formatoMoneda(l.precioUnitarioAplicado),
           formatoMoneda(l.importe),
         ];

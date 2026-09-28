@@ -236,48 +236,69 @@
     },
 
     /**
-     * Asigna el próximo número de presupuesto de forma ATÓMICA: si dos PCs
-     * lo piden al mismo tiempo, Firestore garantiza que cada una se lleve
-     * un número distinto (reintenta solo si hay choque). Por eso es la
-     * única función de Store que devuelve una Promise en vez del valor
-     * directo -- ver los 2 puntos en app.js que hacen .then() con esto.
+     * Asigna el próximo número de presupuesto.
+     *
+     * ANTES: usaba una transacción de Firestore (db.runTransaction), que
+     * es ATÓMICA pero tiene un problema serio: las transacciones de
+     * Firestore necesitan ida y vuelta real al servidor SIEMPRE, incluso
+     * con la persistencia offline activada -- no se resuelven nunca desde
+     * el caché local. Resultado: sin conexión, esta función se quedaba
+     * esperando para siempre, sin error visible, y el presupuesto nunca
+     * se guardaba. Esto es lo que estaba pasando cuando se perdió un
+     * presupuesto armado sin internet.
+     *
+     * AHORA: calcula el número contra el caché local (cache.historial y
+     * cache.config), que ya se mantiene al día en tiempo real -- incluso
+     * offline, gracias a la persistencia de Firestore (enablePersistence
+     * en firebase-init.js). Es instantáneo y funciona con o sin conexión.
      *
      * A PRUEBA DE CHOQUES: antes de entregar un número, verifica contra el
-     * historial REAL que no esté ya usado (no confía ciegamente en el
-     * contador guardado). Si lo está -- por ejemplo, porque una
-     * importación vieja lo dejó desalineado, como pasó una vez -- lo
-     * salta solo y prueba el siguiente, sin que haga falta corregir nada
-     * a mano en Configuración nunca más.
+     * historial real que no esté ya usado (no confía ciegamente en el
+     * contador guardado). Si lo está, lo salta solo y prueba el siguiente.
+     *
+     * Trade-off consciente: al dejar de ser atómico, si DOS dispositivos
+     * estuvieran generando un presupuesto nuevo sin conexión en el mismo
+     * instante, en teoría podrían llevarse el mismo número (algo que la
+     * transacción anterior evitaba, pero que no puede pasar cuando hay
+     * conexión: ahí el caché está al segundo). En el uso real de esta app
+     * (alguien viajando, sin señal, generalmente solo) es un riesgo muy
+     * bajo comparado con el problema que resuelve: hoy, offline, el 100%
+     * de los presupuestos se perdían.
      */
     tomarSiguienteNumero: function () {
       const MAX_INTENTOS = 200;
-      return db.runTransaction(function (tx) {
-        return tx.get(DOC_CONFIG).then(function (doc) {
-          const config = completarConfig(doc.exists ? doc.data() : null);
-          let n = config.numeracion.siguienteNumero;
+      const config = completarConfig(cache.config);
+      let n = config.numeracion.siguienteNumero;
+      let numeroFormateado = null;
 
-          function probarSiguiente(intento) {
-            if (intento > MAX_INTENTOS) {
-              throw new Error(
-                'No se encontró un número de presupuesto libre después de ' + MAX_INTENTOS +
-                ' intentos. Revisá la numeración en Configuración.'
-              );
-            }
-            const numeroFormateado = config.numeracion.prefijo + String(n).padStart(config.numeracion.padding, '0');
-            return tx.get(COL_HISTORIAL.doc(idSeguro(numeroFormateado))).then(function (docExistente) {
-              if (docExistente.exists) {
-                n++;
-                return probarSiguiente(intento + 1);
-              }
-              config.numeracion.siguienteNumero = n + 1;
-              tx.set(DOC_CONFIG, config);
-              return numeroFormateado;
-            });
-          }
+      for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+        const candidato = config.numeracion.prefijo + String(n).padStart(config.numeracion.padding, '0');
+        const yaExiste = cache.historial.some(function (p) { return p.numero === candidato; });
+        if (!yaExiste) {
+          numeroFormateado = candidato;
+          break;
+        }
+        n++;
+      }
 
-          return probarSiguiente(1);
-        });
+      if (!numeroFormateado) {
+        return Promise.reject(new Error(
+          'No se encontró un número de presupuesto libre después de ' + MAX_INTENTOS +
+          ' intentos. Revisá la numeración en Configuración.'
+        ));
+      }
+
+      // Reserva el número: actualización optimista del caché (instantánea) +
+      // escritura en Firestore. Si no hay conexión, Firestore la encola sola
+      // y la sincroniza cuando vuelva la señal -- no hace falta esperarla.
+      cache.config = completarConfig(Object.assign({}, config, {
+        numeracion: Object.assign({}, config.numeracion, { siguienteNumero: n + 1 }),
+      }));
+      DOC_CONFIG.set(cache.config).catch(function (err) {
+        console.error('[store] No se pudo guardar el número siguiente en la nube (se sincroniza solo al volver la conexión):', err);
       });
+
+      return Promise.resolve(numeroFormateado);
     },
 
     // -------------------------------------------------------------------

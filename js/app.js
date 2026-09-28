@@ -310,11 +310,11 @@
     estadoApp.carrito.forEach(function (linea) {
       const precioEditado = !!linea.editadoManualmente;
       const esArticuloFueraDeLista = !!linea.esManual;
+      // La columna de tipo de precio solo se completa cuando el precio
+      // aplicado es el de pack; para unitario o manual queda en blanco.
       const etiquetaTipo = linea.tipoPrecio === 'pack'
         ? ('Pack (≥' + linea.cantidadPack + 'u)')
-        : (linea.tipoPrecio === 'manual'
-          ? (esArticuloFueraDeLista ? 'Manual (fuera de lista)' : 'Manual')
-          : 'Unitario');
+        : '';
 
       const celdaPrecio = crearElemento('td', { class: 'col-precio' }, [
         crearElemento('input', {
@@ -349,7 +349,9 @@
           }),
         ]),
         crearElemento('td', { class: 'col-tipo' }, [
-          crearElemento('span', { class: 'badge badge-' + linea.tipoPrecio }, [etiquetaTipo]),
+          etiquetaTipo
+            ? crearElemento('span', { class: 'badge badge-' + linea.tipoPrecio }, [etiquetaTipo])
+            : document.createTextNode(''),
         ]),
         celdaPrecio,
         crearElemento('td', { class: 'col-subtotal' }, [Quote.formatoMoneda(linea.importe)]),
@@ -480,6 +482,13 @@
     // confirmación de la nube (para que dos PCs nunca se lleven el mismo
     // número si guardan al mismo tiempo). Todo lo demás sigue igual.
     $('#btn-guardar-presupuesto').addEventListener('click', function () {
+      if (estadoApp.carrito.length === 0) {
+        mostrarAviso('Agregá al menos un producto antes de generar el presupuesto.', true);
+        return;
+      }
+      // Se pregunta ANTES de armar el presupuesto: así, si contesta que no,
+      // no se gasta un número correlativo por nada.
+      if (!window.confirm('¿Desea guardar el presupuesto?')) return;
       armarPresupuestoDesdeFormulario({}).then(function (presupuesto) {
         if (!presupuesto) return;
         Store.guardarPresupuesto(presupuesto);
@@ -503,6 +512,11 @@
     });
 
     $('#btn-descargar-pdf').addEventListener('click', function () {
+      if (estadoApp.carrito.length === 0) {
+        mostrarAviso('Agregá al menos un producto antes de generar el presupuesto.', true);
+        return;
+      }
+      if (!window.confirm('¿Desea guardar el presupuesto?')) return;
       armarPresupuestoDesdeFormulario({}).then(function (presupuesto) {
         if (!presupuesto) return;
         Store.guardarPresupuesto(presupuesto);
@@ -920,7 +934,7 @@
         crearElemento('tr', { class: l.noEncontradoEnListaVigente ? 'fila-alerta' : '' }, [
           crearElemento('td', {}, [l.articulo]),
           crearElemento('td', {}, [String(l.cantidad)]),
-          crearElemento('td', {}, [l.tipoPrecio === 'pack' ? 'Pack' : (l.tipoPrecio === 'manual' ? 'Manual' : 'Unitario')]),
+          crearElemento('td', {}, [l.tipoPrecio === 'pack' ? 'Pack' : '']),
           crearElemento('td', {}, [Quote.formatoMoneda(l.precioUnitarioAplicado)]),
           crearElemento('td', {}, [Quote.formatoMoneda(l.importe)]),
         ])
@@ -1331,6 +1345,42 @@
   }
 
   // ---------------------------------------------------------------------
+  // Mayúsculas automáticas: todo el texto que termina en el presupuesto
+  // (cliente, producto manual, condiciones, observaciones, datos de la
+  // empresa) se escribe siempre en mayúsculas, como el resto de la lista
+  // de precios. No se aplica a los buscadores (no guardan datos, y la
+  // búsqueda ya ignora mayúsculas/minúsculas) ni a los campos de email.
+  // ---------------------------------------------------------------------
+  const CAMPOS_MAYUSCULAS = [
+    'input-cliente-nombre',
+    'input-cliente-contacto',
+    'manual-nombre',
+    'input-condiciones',
+    'input-observaciones',
+    'cfg-nombre',
+    'cfg-direccion',
+    'cfg-telefono',
+    'cfg-cuit',
+    'cfg-condiciones',
+    'cfg-prefijo',
+  ];
+
+  function initMayusculasAutomaticas() {
+    CAMPOS_MAYUSCULAS.forEach(function (id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', function () {
+        const inicio = el.selectionStart;
+        const fin = el.selectionEnd;
+        el.value = el.value.toUpperCase();
+        // Restaura la posición del cursor (toUpperCase no cambia el largo
+        // del texto en español, así que la posición se mantiene exacta).
+        if (inicio !== null && fin !== null) el.setSelectionRange(inicio, fin);
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
   // Avisos
   // ---------------------------------------------------------------------
   let avisoTimeout = null;
@@ -1371,6 +1421,7 @@
         initHistorialHerramientas();
         initTogglePapelera();
         initBackupCompleto();
+        initMayusculasAutomaticas();
         limpiarFormularioNuevoPresupuesto();
         renderListaPreciosInfo();
       });
