@@ -441,5 +441,6 @@ td.vacio { text-align: center; color: var(--tinta-suave); padding: 24px 10px; fo
   .acciones-presupuesto { justify-content: stretch; }
   .acciones-presupuesto .btn { flex: 1; }
   thead th, tbody td { padding: 8px 6px; font-size: 0.8rem; }
-  .resultado-precio { display: none; }
+  .resultado-item { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .resultado-precio { white-space: normal; }
 }
