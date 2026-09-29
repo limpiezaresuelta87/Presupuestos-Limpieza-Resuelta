@@ -16,6 +16,16 @@
 
 .chart-wrap { position: relative; height: 260px; margin-top: 10px; }
 .chart-wrap-chico { height: 220px; margin-bottom: 14px; }
+.chart-sin-datos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 0 20px;
+  font-size: 0.82rem;
+  color: var(--tinta-suave);
+}
 
 @media (max-width: 900px) {
   .grid-kpis { grid-template-columns: 1fr 1fr; }

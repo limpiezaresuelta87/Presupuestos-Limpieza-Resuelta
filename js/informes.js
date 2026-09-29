@@ -34,9 +34,28 @@
   // de dibujar la nueva.
   const instanciasChart = {};
   function crearOActualizarChart(idCanvas, config) {
-    if (typeof window.Chart === 'undefined') return null; // sin internet la primera vez, no rompe el resto del informe
     const canvas = $('#' + idCanvas);
     if (!canvas) return null;
+    const wrap = canvas.closest('.chart-wrap');
+    if (typeof window.Chart === 'undefined') {
+      // Sin internet la primera vez (o señal muy débil justo en ese
+      // momento): Chart.js todavía no se pudo descargar y cachear. No
+      // rompe el resto del informe, pero avisamos por qué está en
+      // blanco en vez de dejarlo así sin explicación -- se soluciona
+      // solo la próxima vez que haya buena conexión.
+      if (wrap && !wrap.querySelector('.chart-sin-datos')) {
+        canvas.style.display = 'none';
+        wrap.appendChild(crearElemento('p', { class: 'chart-sin-datos' }, [
+          'No se pudo cargar el gráfico (sin conexión la primera vez). Se soluciona solo abriendo la app con internet.',
+        ]));
+      }
+      return null;
+    }
+    if (wrap) {
+      const aviso = wrap.querySelector('.chart-sin-datos');
+      if (aviso) aviso.remove();
+      canvas.style.display = '';
+    }
     if (instanciasChart[idCanvas]) instanciasChart[idCanvas].destroy();
     instanciasChart[idCanvas] = new window.Chart(canvas, config);
     return instanciasChart[idCanvas];
