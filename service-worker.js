@@ -44,11 +44,13 @@ const APP_SHELL = [
   './icons/icon-512.png',
   './icons/icon-512-maskable.png',
 
-  // Librerías externas (CDN) usadas para Excel y PDF
-  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
+  // Librerías (Excel, PDF, gráficos) ahora vendorizadas dentro del propio
+  // repo -- ya no dependen de que cdnjs/jsDelivr las sigan teniendo
+  // publicadas. Ver /vendor/README.md para cómo actualizarlas.
+  './vendor/xlsx.full.min.js',
+  './vendor/jspdf.umd.min.js',
+  './vendor/jspdf.plugin.autotable.min.js',
+  './vendor/chart.umd.js',
 
   // Firebase (compat, por CDN)
   'https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js',
