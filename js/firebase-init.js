@@ -184,6 +184,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.body.addEventListener('click', (e) => {
     if (e.target && e.target.id === 'auth-btn-login') {
+      // La ventana emergente de Google para iniciar sesión no funciona
+      // bien dentro de la app instalada (modo standalone, sin barra de
+      // Chrome) -- en vez de quedarse trabada en "Abriendo Google…"
+      // para siempre, avisamos y pedimos entrar por Chrome directo, que
+      // es donde el popup sí anda bien.
+      const enAppInstalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+      if (enAppInstalada) {
+        mostrarOverlay('El inicio de sesión no funciona desde la app instalada. Abrí esta misma dirección directamente en Chrome (no desde el ícono) para iniciar sesión la primera vez.', true);
+        return;
+      }
       e.target.disabled = true;
       e.target.textContent = 'Abriendo Google…';
       const provider = new firebase.auth.GoogleAuthProvider();
@@ -231,6 +241,19 @@ document.addEventListener('DOMContentLoaded', () => {
       callbacksListos.splice(0).forEach((fn) => fn(user));
     }).catch(function (err) {
       console.error('[firebase] No se pudo verificar la lista de correos autorizados:', err);
+      // Si falló específicamente por no tener conexión (y no por otra
+      // cosa), dejamos pasar a quien YA tenía sesión iniciada en este
+      // dispositivo -- si no, alguien que abre la app sin señal (todo el
+      // sentido de que funcione offline) quedaría afuera sin forma de
+      // volver a entrar hasta recuperar señal. La seguridad real la
+      // sigue haciendo Firestore con sus propias reglas (firestore.rules),
+      // que se aplican igual apenas vuelva la conexión.
+      if (err && (err.code === 'unavailable' || !navigator.onLine)) {
+        usuarioActual = user;
+        ocultarOverlay();
+        callbacksListos.splice(0).forEach((fn) => fn(user));
+        return;
+      }
       auth.signOut();
       usuarioActual = null;
       mostrarOverlay('No se pudo verificar el acceso. Probá de nuevo.', true);
