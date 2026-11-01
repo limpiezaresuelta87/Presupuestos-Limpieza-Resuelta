@@ -47,11 +47,13 @@
 
   const CONFIG_POR_DEFECTO = {
     empresa: {
-      nombre: 'MI EMPRESA S.R.L.',
-      direccion: 'Dirección de la empresa 123',
-      telefono: '+54 9 341 000-0000',
-      email: 'ventas@miempresa.com',
-      cuit: '30-00000000-0',
+      // Vacíos a propósito: los datos de la empresa solo salen en los PDF
+      // cuando se cargan en Configuración.
+      nombre: '',
+      direccion: '',
+      telefono: '',
+      email: '',
+      cuit: '',
       logoBase64: '',
     },
     condicionesPagoPorDefecto: 'Contado / Transferencia bancaria',
@@ -68,10 +70,27 @@
     return JSON.parse(JSON.stringify(obj));
   }
 
+  // Valores de ejemplo que versiones anteriores de la app guardaban como si
+  // fueran datos reales. Si quedaron grabados, se tratan como "sin cargar".
+  const EMPRESA_VALORES_DE_EJEMPLO = {
+    nombre: 'MI EMPRESA S.R.L.',
+    direccion: 'Dirección de la empresa 123',
+    telefono: '+54 9 341 000-0000',
+    email: 'ventas@miempresa.com',
+    cuit: '30-00000000-0',
+  };
+
+  function limpiarEmpresaDeEjemplo(empresa) {
+    Object.keys(EMPRESA_VALORES_DE_EJEMPLO).forEach(function (campo) {
+      if (empresa[campo] === EMPRESA_VALORES_DE_EJEMPLO[campo]) empresa[campo] = '';
+    });
+    return empresa;
+  }
+
   function completarConfig(datos) {
     const base = datos || {};
     return Object.assign(clonar(CONFIG_POR_DEFECTO), base, {
-      empresa: Object.assign({}, CONFIG_POR_DEFECTO.empresa, base.empresa || {}),
+      empresa: limpiarEmpresaDeEjemplo(Object.assign({}, CONFIG_POR_DEFECTO.empresa, base.empresa || {})),
       numeracion: Object.assign({}, CONFIG_POR_DEFECTO.numeracion, base.numeracion || {}),
     });
   }
