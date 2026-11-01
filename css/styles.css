@@ -131,6 +131,8 @@ input, textarea { font-family: inherit; }
 .campo-flex { flex: 1; min-width: 220px; }
 
 /* --------------------------- Buscador -------------------------------- */
+.visual-mayusculas { text-transform: uppercase; }
+
 .buscador-wrap { position: relative; }
 .buscador-wrap input {
   width: 100%;

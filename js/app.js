@@ -415,7 +415,7 @@
     });
 
     $('#btn-agregar-manual').addEventListener('click', function () {
-      const nombre = $('#manual-nombre').value.trim();
+      const nombre = $('#manual-nombre').value.trim().toUpperCase();
       if (!nombre) {
         mostrarAviso('Ingresá el nombre del artículo.', true);
         return;
@@ -761,9 +761,9 @@
         },
         totales,
         {
-          condicionesPago: $('#input-condiciones').value.trim() || Store.obtenerConfig().condicionesPagoPorDefecto,
+          condicionesPago: $('#input-condiciones').value.trim().toUpperCase() || Store.obtenerConfig().condicionesPagoPorDefecto,
           validezDias: Number($('#input-validez').value) || Store.obtenerConfig().validezDiasPorDefecto,
-          observaciones: $('#input-observaciones').value.trim(),
+          observaciones: $('#input-observaciones').value.trim().toUpperCase(),
           listaPreciosFecha: estadoApp.listaPrecios.actualizado,
         }
       );
@@ -792,7 +792,8 @@
     estadoApp.edicion = null;
     ocultarBannerEdicion();
     $('#form-manual').style.display = 'none';
-    $('#campo-cliente-nuevo').style.display = 'none';
+    const campoClienteNuevo = $('#campo-cliente-nuevo'); // ya no existe en el HTML; se protege por si vuelve
+    if (campoClienteNuevo) campoClienteNuevo.style.display = 'none';
     establecerCliente('');
     $('#input-cliente-contacto').value = '';
     $('#input-observaciones').value = '';
@@ -1540,8 +1541,23 @@
     'cfg-prefijo',
   ];
 
+  // Campos de texto libre donde queremos que el corrector ortográfico del
+  // navegador pueda marcar errores. Si se pasaran a mayúscula mientras se
+  // escribe, el navegador no los revisa (ignora palabras en mayúsculas).
+  // Por eso: mientras se tipea se ven en mayúscula (solo visual, con CSS)
+  // pero el texto real queda como se escribió, y se pasa a mayúscula al
+  // salir del campo.
+  const CAMPOS_CON_CORRECTOR = ['manual-nombre', 'input-condiciones', 'input-observaciones'];
+
   function initMayusculasAutomaticas() {
+    CAMPOS_CON_CORRECTOR.forEach(function (id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('visual-mayusculas');
+      el.addEventListener('blur', function () { el.value = el.value.toUpperCase(); });
+    });
     CAMPOS_MAYUSCULAS.forEach(function (id) {
+      if (CAMPOS_CON_CORRECTOR.indexOf(id) !== -1) return;
       const el = document.getElementById(id);
       if (!el) return;
       el.addEventListener('input', function () {
