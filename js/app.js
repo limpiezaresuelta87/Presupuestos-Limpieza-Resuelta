@@ -527,6 +527,7 @@
       const lista = $('#lista-ortografia');
       lista.innerHTML = '';
       const selectores = [];
+      const manuales = [];
 
       items.forEach(function (item) {
         const select = crearElemento('select', {}, []);
@@ -534,13 +535,23 @@
           select.appendChild(crearElemento('option', { value: '' }, ['Corregir a…']));
           item.sugerencias.forEach(function (s) { select.appendChild(crearElemento('option', { value: 'sug:' + s }, [s])); });
         }
+        select.appendChild(crearElemento('option', { value: 'manual' }, ['Escribir la corrección yo…']));
         select.appendChild(crearElemento('option', { value: 'dejar' }, ['Está bien así']));
         select.appendChild(crearElemento('option', { value: 'agregar' }, ['Está bien, agregar al diccionario']));
         select.value = item.sugerencias.length ? '' : 'dejar';
         selectores.push(select);
+        // Cuadro para escribir la corrección a mano (aparece al elegir esa opción)
+        const manual = crearElemento('input', { type: 'text', class: 'orto-manual', value: item.palabra, placeholder: 'Escribí la palabra correcta', autocomplete: 'off' });
+        manual.style.display = 'none';
+        manuales.push(manual);
+        select.addEventListener('change', function () {
+          manual.style.display = select.value === 'manual' ? 'block' : 'none';
+          if (select.value === 'manual') { manual.focus(); manual.select(); }
+        });
         lista.appendChild(crearElemento('li', {}, [
           crearElemento('span', { class: 'orto-palabra' }, [item.palabra, crearElemento('span', { class: 'orto-donde' }, [item.fuente.donde])]),
           select,
+          manual,
         ]));
       });
 
@@ -558,6 +569,11 @@
           const v = selectores[i].value;
           if (v.indexOf('sug:') === 0) {
             item.fuente.escribir(Corrector.reemplazarPalabra(item.fuente.leer(), item.palabra, v.slice(4)));
+          } else if (v === 'manual') {
+            const escrita = manuales[i].value.trim();
+            if (escrita && escrita !== item.palabra) {
+              item.fuente.escribir(Corrector.reemplazarPalabra(item.fuente.leer(), item.palabra, escrita));
+            }
           } else if (v === 'agregar') {
             nuevas.push(item.palabra.toLowerCase());
           }
@@ -601,9 +617,41 @@
     });
   }
 
+  /** Dibuja los proveedores como botones (se ven todos, un toque para elegir). El elegido queda marcado. */
+  function renderBotonesProveedorManual() {
+    const sel = $('#manual-proveedor');
+    const cont = $('#manual-proveedor-chips');
+    if (!sel || !cont) return;
+    const elegido = sel.value || '';
+    cont.innerHTML = '';
+    function boton(texto, valor, claseExtra) {
+      const activo = valor === elegido;
+      return crearElemento('button', {
+        type: 'button',
+        class: 'btn-mini prov-chip' + (activo ? ' prov-chip-activo' : '') + (claseExtra ? ' ' + claseExtra : ''),
+        onclick: function () {
+          if (valor === OPCION_OTRO_PROVEEDOR) {
+            pedirProveedorNuevo(function (nombre) {
+              if (nombre !== null) llenarSelectorProveedor(sel, nombre);
+              renderBotonesProveedorManual();
+            });
+            return;
+          }
+          llenarSelectorProveedor(sel, valor);
+          renderBotonesProveedorManual();
+        },
+      }, [texto]);
+    }
+    cont.appendChild(boton('No sé / Otros', ''));
+    obtenerProveedoresConocidos().forEach(function (n) { cont.appendChild(boton(n, n)); });
+    if (elegido && obtenerProveedoresConocidos().indexOf(elegido) === -1) cont.appendChild(boton(elegido, elegido));
+    cont.appendChild(boton('+ Otro proveedor', OPCION_OTRO_PROVEEDOR, 'prov-chip-otro'));
+  }
+
   function actualizarSugerenciasProveedor() {
     const sel = $('#manual-proveedor');
     if (sel) llenarSelectorProveedor(sel, '');
+    renderBotonesProveedorManual();
   }
 
   // ---------------------------------------------------------------------
@@ -617,11 +665,6 @@
       const visible = form.style.display !== 'none';
       form.style.display = visible ? 'none' : 'flex';
       if (!visible) { actualizarSugerenciasProveedor(); $('#manual-nombre').focus(); }
-    });
-
-    // Si en el desplegable eligen "+ Otro proveedor…", se pide el nombre en el momento.
-    $('#manual-proveedor').addEventListener('change', function (e) {
-      manejarCambioSelectorProveedor(e.target, '', function () { /* el valor queda elegido en el desplegable */ });
     });
 
     $('#btn-agregar-manual').addEventListener('click', function () {
@@ -641,6 +684,7 @@
       estadoApp.carrito.push(Quote.crearLineaManual(nombre, cantidad, precio, proveedor));
       $('#manual-nombre').value = '';
       llenarSelectorProveedor($('#manual-proveedor'), '');
+      renderBotonesProveedorManual();
       $('#manual-cantidad').value = '';
       $('#manual-precio').value = '';
       form.style.display = 'none';

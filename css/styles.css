@@ -491,3 +491,6 @@ td.vacio { text-align: center; color: var(--tinta-suave); padding: 24px 10px; fo
 .lista-ortografia select { padding: 8px; border: 1px solid var(--linea); border-radius: 8px; font-size: 0.9rem; max-width: 55%; }
 .prov-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
 .prov-chip { padding: 8px 14px; font-size: 0.95rem; }
+.prov-chip-activo { background: var(--teal); color: #fff; border-color: var(--teal); }
+.prov-chip-otro { border-style: dashed; }
+.lista-ortografia .orto-manual { width: 100%; flex-basis: 100%; margin-top: 4px; }
