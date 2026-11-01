@@ -79,6 +79,7 @@
             placeholder="Escribí para buscar un artículo…"
             autocomplete="off"
           />
+          <button type="button" id="btn-voz-buscador" class="btn-voz" title="Buscar por voz" aria-label="Buscar por voz" style="display:none;">🎤</button>
           <ul id="resultados-busqueda" class="resultados-busqueda"></ul>
         </div>
 
@@ -86,7 +87,7 @@
           <div class="rapido-nombre" id="rapido-nombre"></div>
           <div class="rapido-fila">
             <label for="rapido-cantidad">Cantidad</label>
-            <input type="number" id="rapido-cantidad" min="1" value="1" />
+            <input type="number" id="rapido-cantidad" min="1" value="" placeholder="Cant." inputmode="numeric" />
             <button type="button" class="btn btn-primario" id="btn-rapido-agregar">Agregar</button>
             <button type="button" class="btn-icono" id="btn-rapido-cancelar" title="Cancelar">✕</button>
           </div>
@@ -99,15 +100,19 @@
         <div id="form-manual" class="fila-config-presupuesto" style="display:none;">
           <div class="campo campo-flex">
             <label for="manual-nombre">Nombre del artículo</label>
-            <input type="text" id="manual-nombre" placeholder="Ej: Pedido especial del cliente" />
+            <input type="text" id="manual-nombre" placeholder="Ej: Pedido especial del cliente" spellcheck="true" lang="es" />
+          </div>
+          <div class="campo campo-flex">
+            <label for="manual-proveedor">Proveedor</label>
+            <select id="manual-proveedor"></select>
           </div>
           <div class="campo campo-chico">
             <label for="manual-cantidad">Cantidad</label>
-            <input type="number" id="manual-cantidad" min="1" value="1" />
+            <input type="number" id="manual-cantidad" min="1" value="" placeholder="Cant." inputmode="numeric" />
           </div>
           <div class="campo campo-chico">
             <label for="manual-precio">Precio unitario</label>
-            <input type="number" id="manual-precio" min="0" step="0.01" value="0" />
+            <input type="number" id="manual-precio" min="0" step="0.01" value="" placeholder="0,00" inputmode="decimal" />
           </div>
           <div class="campo campo-chico">
             <button type="button" class="btn btn-primario" id="btn-agregar-manual">Agregar</button>
@@ -144,13 +149,13 @@
           </div>
           <div class="campo campo-flex">
             <label for="input-condiciones">Condiciones de pago</label>
-            <input type="text" id="input-condiciones" placeholder="Ej: Contado / Transferencia" />
+            <input type="text" id="input-condiciones" placeholder="Ej: Contado / Transferencia" spellcheck="true" lang="es" />
           </div>
         </div>
 
         <div class="campo">
           <label for="input-observaciones">Observaciones</label>
-          <textarea id="input-observaciones" rows="2" placeholder="Notas adicionales para el cliente…"></textarea>
+          <textarea id="input-observaciones" rows="2" placeholder="Notas adicionales para el cliente…" spellcheck="true" lang="es"></textarea>
         </div>
 
         <div class="totales">

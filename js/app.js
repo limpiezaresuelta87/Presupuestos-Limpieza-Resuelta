@@ -84,6 +84,67 @@
   // ---------------------------------------------------------------------
   // Buscador de productos
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // Búsqueda por voz (Web Speech API del navegador). Dicta el texto en el
+  // buscador y dispara la misma búsqueda que al tipear. Si el navegador no
+  // lo soporta (ej. Firefox), el botón del micrófono directamente no se
+  // muestra. En Chrome/Edge/Safari el reconocimiento usa el servicio del
+  // navegador, así que requiere conexión a internet.
+  // ---------------------------------------------------------------------
+  function initBusquedaPorVoz(input) {
+    const boton = $('#btn-voz-buscador');
+    const Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!boton || !Reconocimiento) return;
+    boton.style.display = '';
+
+    let reconocedor = null;
+
+    function detener() {
+      if (reconocedor) { try { reconocedor.stop(); } catch (e) { /* ya detenido */ } }
+    }
+
+    boton.addEventListener('click', function () {
+      if (reconocedor) { detener(); return; }
+
+      reconocedor = new Reconocimiento();
+      reconocedor.lang = 'es-AR';
+      reconocedor.interimResults = true;
+      reconocedor.continuous = false;
+      reconocedor.maxAlternatives = 1;
+
+      reconocedor.onstart = function () {
+        boton.classList.add('escuchando');
+        input.placeholder = 'Escuchando… decí el nombre del artículo';
+      };
+      reconocedor.onresult = function (ev) {
+        let texto = '';
+        for (let i = 0; i < ev.results.length; i++) texto += ev.results[i][0].transcript;
+        // Sin punto final ni espacios sobrantes que estorben la búsqueda
+        input.value = texto.replace(/[.,;!?¿¡]+/g, ' ').replace(/\s+/g, ' ').trim();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      reconocedor.onerror = function (ev) {
+        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+          mostrarAviso('No hay permiso para usar el micrófono. Habilitalo en el navegador para este sitio.', true);
+        } else if (ev.error === 'network') {
+          mostrarAviso('La búsqueda por voz necesita conexión a internet.', true);
+        } else if (ev.error === 'no-speech') {
+          mostrarAviso('No se escuchó nada. Probá de nuevo.', true);
+        } else if (ev.error !== 'aborted') {
+          mostrarAviso('No se pudo usar la voz (' + ev.error + ').', true);
+        }
+      };
+      reconocedor.onend = function () {
+        boton.classList.remove('escuchando');
+        input.placeholder = 'Escribí para buscar un artículo…';
+        reconocedor = null;
+        input.focus();
+      };
+
+      try { reconocedor.start(); } catch (e) { reconocedor = null; }
+    });
+  }
+
   function initBuscador() {
     const input = $('#buscador-producto');
     const resultados = $('#resultados-busqueda');
@@ -132,6 +193,8 @@
       if (!e.target.closest('.buscador-wrap')) resultados.classList.remove('visible');
     });
 
+    initBusquedaPorVoz(input);
+
     input.addEventListener('keydown', function (e) {
       const items = $$('.resultado-item', resultados);
       if (!items.length) return;
@@ -152,9 +215,9 @@
 
   function agregarProductoAlCarrito(producto, cantidad) {
     cantidad = Math.max(1, Math.floor(Number(cantidad) || 1));
-    const existente = estadoApp.carrito.find(function (l) { return l.articulo === producto.articulo; });
-    if (existente) {
-      actualizarCantidad(producto.articulo, existente.cantidad + cantidad);
+    const idxExistente = estadoApp.carrito.findIndex(function (l) { return !l.esManual && Quote.nombreEnLista(l) === producto.articulo; });
+    if (idxExistente !== -1) {
+      actualizarCantidad(idxExistente, estadoApp.carrito[idxExistente].cantidad + cantidad);
     } else {
       estadoApp.carrito.push(Quote.crearLineaCarrito(producto, cantidad));
     }
@@ -171,8 +234,9 @@
   function abrirSeleccionRapida(producto) {
     estadoApp.seleccionRapida = { producto: producto };
     $('#resultados-busqueda').classList.remove('visible');
-    renderSeleccionRapida();
     const inputCantidad = $('#rapido-cantidad');
+    inputCantidad.value = ''; // arranca vacío: no hay que borrar nada antes de escribir
+    renderSeleccionRapida();
     inputCantidad.focus();
     inputCantidad.select();
   }
@@ -195,7 +259,7 @@
     const cantidadInput = $('#rapido-cantidad');
     const cantidad = Math.max(1, Math.floor(Number(cantidadInput.value) || 1));
     const r = Quote.calcularPrecioAplicado(sel.producto, cantidad);
-    const yaEnCarrito = estadoApp.carrito.find(function (l) { return l.articulo === sel.producto.articulo; });
+    const yaEnCarrito = estadoApp.carrito.find(function (l) { return !l.esManual && Quote.nombreEnLista(l) === sel.producto.articulo; });
 
     $('#rapido-nombre').textContent = sel.producto.articulo;
     $('#rapido-preview').textContent =
@@ -209,6 +273,11 @@
     const sel = estadoApp.seleccionRapida;
     if (!sel) return;
     const cantidad = $('#rapido-cantidad').value;
+    if (!(Number(cantidad) >= 1)) {
+      mostrarAviso('Ingresá la cantidad.', true);
+      $('#rapido-cantidad').focus();
+      return;
+    }
     agregarProductoAlCarrito(sel.producto, cantidad);
     mostrarAviso(sel.producto.articulo + ' agregado al presupuesto.');
     cerrarSeleccionRapida();
@@ -224,9 +293,8 @@
     $('#btn-rapido-cancelar').addEventListener('click', cerrarSeleccionRapida);
   }
 
-  function actualizarCantidad(articulo, nuevaCantidad) {
-    const idx = estadoApp.carrito.findIndex(function (l) { return l.articulo === articulo; });
-    if (idx === -1) return;
+  function actualizarCantidad(idx, nuevaCantidad) {
+    if (idx < 0 || idx >= estadoApp.carrito.length) return;
     const cantidad = Math.max(1, Math.floor(Number(nuevaCantidad) || 1));
     const lineaActual = estadoApp.carrito[idx];
     if (lineaActual.editadoManualmente) {
@@ -234,31 +302,98 @@
       // recalcula el subtotal con la nueva cantidad (no vuelve a la lista de precios).
       estadoApp.carrito[idx] = Quote.recalcularImporteConPrecioActual(lineaActual, cantidad);
     } else {
-      const producto = estadoApp.listaPrecios.items.find(function (p) { return p.articulo === articulo; });
-      estadoApp.carrito[idx] = producto
-        ? Quote.crearLineaCarrito(producto, cantidad)
-        : Object.assign({}, lineaActual, { cantidad: cantidad });
+      const nombreLista = Quote.nombreEnLista(lineaActual);
+      const producto = estadoApp.listaPrecios.items.find(function (p) { return p.articulo === nombreLista; });
+      if (producto) {
+        const nueva = Quote.crearLineaCarrito(producto, cantidad);
+        // Conserva el nombre editado a mano, si lo hubiera.
+        if (lineaActual.articuloLista) { nueva.articulo = lineaActual.articulo; nueva.articuloLista = lineaActual.articuloLista; }
+        estadoApp.carrito[idx] = nueva;
+      } else {
+        estadoApp.carrito[idx] = Object.assign({}, lineaActual, { cantidad: cantidad });
+      }
     }
     renderCarrito();
   }
 
-  function actualizarPrecioManual(articulo, nuevoPrecio) {
-    const idx = estadoApp.carrito.findIndex(function (l) { return l.articulo === articulo; });
-    if (idx === -1) return;
+  function actualizarPrecioManual(idx, nuevoPrecio) {
+    if (idx < 0 || idx >= estadoApp.carrito.length) return;
     estadoApp.carrito[idx] = Quote.marcarPrecioManual(estadoApp.carrito[idx], nuevoPrecio);
     renderCarrito();
   }
 
-  function restablecerPrecioLinea(articulo) {
-    const idx = estadoApp.carrito.findIndex(function (l) { return l.articulo === articulo; });
-    if (idx === -1) return;
+  function restablecerPrecioLinea(idx) {
+    if (idx < 0 || idx >= estadoApp.carrito.length) return;
     estadoApp.carrito[idx] = Quote.recalcularLinea(estadoApp.carrito[idx], estadoApp.listaPrecios);
     renderCarrito();
   }
 
-  function quitarDelCarrito(articulo) {
-    estadoApp.carrito = estadoApp.carrito.filter(function (l) { return l.articulo !== articulo; });
+  function quitarDelCarrito(idx) {
+    estadoApp.carrito = estadoApp.carrito.filter(function (l, i) { return i !== idx; });
     renderCarrito();
+  }
+
+  /** Cambia el nombre de un artículo del presupuesto (sirve para cualquier línea, de la lista o manual). */
+  function renombrarArticulo(idx, nuevoNombre) {
+    if (idx < 0 || idx >= estadoApp.carrito.length) return;
+    if (!String(nuevoNombre || '').trim()) {
+      mostrarAviso('El nombre del artículo no puede quedar vacío.', true);
+      renderCarrito();
+      return;
+    }
+    // Mayúsculas, igual que el resto de los nombres de artículos de la app.
+    estadoApp.carrito[idx] = Quote.renombrarLinea(estadoApp.carrito[idx], String(nuevoNombre).toLocaleUpperCase('es'));
+    renderCarrito();
+  }
+
+  /** Cambia el proveedor de un artículo fuera de la lista. */
+  function actualizarProveedorLinea(idx, proveedor) {
+    if (idx < 0 || idx >= estadoApp.carrito.length) return;
+    estadoApp.carrito[idx] = Object.assign({}, estadoApp.carrito[idx], { proveedor: String(proveedor || '').trim() });
+    // No hace falta redibujar toda la tabla: el valor ya está en el input.
+  }
+
+  const OPCION_OTRO_PROVEEDOR = '__otro__';
+
+  /** Proveedores conocidos: los del Excel, los ya usados en presupuestos y los del carrito actual. */
+  function obtenerProveedoresConocidos() {
+    const nombres = {};
+    Object.values(Store.obtenerMapaProveedores()).forEach(function (p) { if (p) nombres[p] = true; });
+    Store.obtenerHistorial().forEach(function (pres) {
+      (pres.lineas || []).forEach(function (l) { if (l.proveedor) nombres[l.proveedor] = true; });
+    });
+    estadoApp.carrito.forEach(function (l) { if (l.proveedor) nombres[l.proveedor] = true; });
+    return Object.keys(nombres).sort(function (x, y) { return x.localeCompare(y, 'es'); });
+  }
+
+  /**
+   * Llena un <select> de proveedores: "Otros proveedores" (si no se sabe), los conocidos (se
+   * elige de la lista para evitar errores de tipeo) y "+ Otro proveedor…"
+   * para uno que todavía no existe. Devuelve el select.
+   */
+  function llenarSelectorProveedor(select, valorActual) {
+    select.innerHTML = '';
+    select.appendChild(crearElemento('option', { value: '' }, ['— No sé / Otros proveedores —']));
+    const conocidos = obtenerProveedoresConocidos();
+    if (valorActual && conocidos.indexOf(valorActual) === -1) conocidos.push(valorActual);
+    conocidos.forEach(function (n) { select.appendChild(crearElemento('option', { value: n }, [n])); });
+    select.appendChild(crearElemento('option', { value: OPCION_OTRO_PROVEEDOR }, ['+ Otro proveedor…']));
+    select.value = valorActual || '';
+    return select;
+  }
+
+  /** Si eligieron "Otro proveedor…" pide el nombre; devuelve el valor final (o null si cancelaron). */
+  function resolverProveedorElegido(select, valorAnterior) {
+    if (select.value !== OPCION_OTRO_PROVEEDOR) return select.value;
+    const nombre = (window.prompt('Nombre del proveedor nuevo:') || '').trim();
+    if (!nombre) { llenarSelectorProveedor(select, valorAnterior || ''); return null; }
+    llenarSelectorProveedor(select, nombre);
+    return nombre;
+  }
+
+  function actualizarSugerenciasProveedor() {
+    const sel = $('#manual-proveedor');
+    if (sel) llenarSelectorProveedor(sel, '');
   }
 
   // ---------------------------------------------------------------------
@@ -271,7 +406,12 @@
     btnToggle.addEventListener('click', function () {
       const visible = form.style.display !== 'none';
       form.style.display = visible ? 'none' : 'flex';
-      if (!visible) $('#manual-nombre').focus();
+      if (!visible) { actualizarSugerenciasProveedor(); $('#manual-nombre').focus(); }
+    });
+
+    // Si en el desplegable eligen "+ Otro proveedor…", se pide el nombre en el momento.
+    $('#manual-proveedor').addEventListener('change', function (e) {
+      resolverProveedorElegido(e.target, '');
     });
 
     $('#btn-agregar-manual').addEventListener('click', function () {
@@ -281,11 +421,18 @@
         return;
       }
       const cantidad = $('#manual-cantidad').value;
+      if (!(Number(cantidad) >= 1)) {
+        mostrarAviso('Ingresá la cantidad.', true);
+        return;
+      }
       const precio = $('#manual-precio').value;
-      estadoApp.carrito.push(Quote.crearLineaManual(nombre, cantidad, precio));
+      const selProv = $('#manual-proveedor');
+      const proveedor = selProv.value === OPCION_OTRO_PROVEEDOR ? '' : selProv.value;
+      estadoApp.carrito.push(Quote.crearLineaManual(nombre, cantidad, precio, proveedor));
       $('#manual-nombre').value = '';
-      $('#manual-cantidad').value = '1';
-      $('#manual-precio').value = '0';
+      llenarSelectorProveedor($('#manual-proveedor'), '');
+      $('#manual-cantidad').value = '';
+      $('#manual-precio').value = '';
       form.style.display = 'none';
       renderCarrito();
       mostrarAviso('Artículo agregado al presupuesto.');
@@ -307,7 +454,7 @@
       );
     }
 
-    estadoApp.carrito.forEach(function (linea) {
+    estadoApp.carrito.forEach(function (linea, idx) {
       const precioEditado = !!linea.editadoManualmente;
       const esArticuloFueraDeLista = !!linea.esManual;
       // La columna de tipo de precio solo se completa cuando el precio
@@ -324,7 +471,7 @@
           value: String(linea.precioUnitarioAplicado),
           class: 'input-precio' + (precioEditado ? ' input-precio-manual' : ''),
           title: 'Editá este valor para fijar un precio distinto solo para este presupuesto.',
-          onchange: function (e) { actualizarPrecioManual(linea.articulo, e.target.value); },
+          onchange: function (e) { actualizarPrecioManual(idx, e.target.value); },
         }),
         // El botón de "restablecer" solo tiene sentido si el artículo existe
         // en la lista de precios; uno agregado a mano no tiene a qué volver.
@@ -332,20 +479,48 @@
           ? crearElemento('button', {
               class: 'btn-icono btn-reset',
               title: 'Restablecer precio de la lista vigente',
-              onclick: function () { restablecerPrecioLinea(linea.articulo); },
+              onclick: function () { restablecerPrecioLinea(idx); },
             }, ['↺'])
           : document.createTextNode(''),
       ]);
 
       const tr = crearElemento('tr', {}, [
-        crearElemento('td', { class: 'col-producto' }, [linea.articulo]),
+        crearElemento('td', { class: 'col-producto' }, [
+          crearElemento('input', {
+            type: 'text',
+            value: linea.articulo,
+            class: 'input-nombre',
+            spellcheck: 'true',
+            lang: 'es',
+            title: 'Podés editar el nombre del artículo solo para este presupuesto.',
+            onchange: function (e) { renombrarArticulo(idx, e.target.value); },
+          }),
+          // Artículos fuera de la lista: se puede indicar (y corregir) el proveedor.
+          linea.esManual
+            ? (function () {
+                const sel = crearElemento('select', {
+                  class: 'input-proveedor',
+                  title: 'Proveedor de este artículo (se usa en la lista de compras).',
+                });
+                llenarSelectorProveedor(sel, linea.proveedor || '');
+                sel.addEventListener('change', function () {
+                  const valor = resolverProveedorElegido(sel, linea.proveedor || '');
+                  if (valor !== null) actualizarProveedorLinea(idx, valor);
+                });
+                return sel;
+              })()
+            : document.createTextNode(''),
+          (!linea.esManual && linea.articuloLista)
+            ? crearElemento('div', { class: 'nombre-lista-original', title: 'Nombre en la lista de precios' }, ['Lista: ' + linea.articuloLista])
+            : document.createTextNode(''),
+        ]),
         crearElemento('td', { class: 'col-cantidad' }, [
           crearElemento('input', {
             type: 'number',
             min: '1',
             value: String(linea.cantidad),
             class: 'input-cantidad',
-            onchange: function (e) { actualizarCantidad(linea.articulo, e.target.value); },
+            onchange: function (e) { actualizarCantidad(idx, e.target.value); },
           }),
         ]),
         crearElemento('td', { class: 'col-tipo' }, [
@@ -356,7 +531,7 @@
         celdaPrecio,
         crearElemento('td', { class: 'col-subtotal' }, [Quote.formatoMoneda(linea.importe)]),
         crearElemento('td', { class: 'col-quitar' }, [
-          crearElemento('button', { class: 'btn-icono', title: 'Quitar', onclick: function () { quitarDelCarrito(linea.articulo); } }, ['✕']),
+          crearElemento('button', { class: 'btn-icono', title: 'Quitar', onclick: function () { quitarDelCarrito(idx); } }, ['✕']),
         ]),
       ]);
       tbody.appendChild(tr);

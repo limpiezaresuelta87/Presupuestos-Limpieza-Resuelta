@@ -159,6 +159,8 @@
   }
 
   const SIN_PROVEEDOR = 'Sin proveedor asignado';
+  // Artículos cargados a mano sin proveedor elegido: no es un error, simplemente no se sabe a quién.
+  const OTROS_PROVEEDORES = 'Otros proveedores';
 
   /**
    * Arma la "lista de compras": las mismas líneas del presupuesto, pero
@@ -198,8 +200,12 @@
     let totalGeneral = 0;
     let totalGeneralCompleto = true; // se pone en false si falta el costo de algún artículo
     presupuesto.lineas.forEach(function (l) {
-      const proveedor = mapaProveedores[normalizar(l.articulo)] || SIN_PROVEEDOR;
-      const costoUnitario = obtenerCosto ? obtenerCosto(l.articulo) : null;
+      // Si la línea trae proveedor cargado a mano (artículo fuera de la
+      // lista), manda ese; si no, el del mapa del Excel. Se busca por el
+      // nombre de la lista, aunque la línea se haya renombrado.
+      const nombreLista = l.articuloLista || l.articulo;
+      const proveedor = (l.proveedor && l.proveedor.trim()) || mapaProveedores[normalizar(nombreLista)] || (l.esManual ? OTROS_PROVEEDORES : SIN_PROVEEDOR);
+      const costoUnitario = (obtenerCosto && !l.esManual) ? obtenerCosto(nombreLista) : null;
       const costoTotal = costoUnitario === null ? null : costoUnitario * l.cantidad;
       if (costoTotal === null) totalGeneralCompleto = false;
       else totalGeneral += costoTotal;
@@ -209,8 +215,10 @@
 
     // Proveedores en orden alfabético, con "Sin proveedor asignado" siempre al final
     const nombresProveedores = Object.keys(grupos)
-      .filter(function (p) { return p !== SIN_PROVEEDOR; })
+      .filter(function (p) { return p !== SIN_PROVEEDOR && p !== OTROS_PROVEEDORES; })
       .sort(function (a, b) { return a.localeCompare(b, 'es'); });
+    // Al final: primero "Otros proveedores", y último el aviso de "Sin proveedor asignado"
+    if (grupos[OTROS_PROVEEDORES]) nombresProveedores.push(OTROS_PROVEEDORES);
     if (grupos[SIN_PROVEEDOR]) nombresProveedores.push(SIN_PROVEEDOR);
 
     nombresProveedores.forEach(function (proveedor) {

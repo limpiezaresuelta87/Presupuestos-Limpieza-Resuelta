@@ -44,16 +44,44 @@
     };
   }
 
+  /** Nombre con el que el artículo figura en la lista de precios (puede diferir del que se muestra si se lo renombró). */
+  function nombreEnLista(linea) {
+    return linea.articuloLista || linea.articulo;
+  }
+
+  /**
+   * Cambia el nombre que se muestra/imprime de una línea, sin perder el
+   * vínculo con la lista de precios (para poder recalcular y buscar el
+   * costo/proveedor igual). Si vuelve a quedar igual al de la lista, se
+   * limpia el vínculo.
+   */
+  function renombrarLinea(linea, nuevoNombre) {
+    const nombre = String(nuevoNombre || '').trim();
+    if (!nombre) return linea;
+    if (linea.esManual) return Object.assign({}, linea, { articulo: nombre });
+    const original = nombreEnLista(linea);
+    const copia = Object.assign({}, linea, { articulo: nombre });
+    if (nombre === original) delete copia.articuloLista;
+    else copia.articuloLista = original;
+    return copia;
+  }
+
   function recalcularLinea(linea, listaVigente) {
     // Los artículos manuales (agregados a mano, no están en la lista de
     // precios) nunca se tocan al recalcular: no tienen un "precio vigente"
     // contra el cual actualizarse.
     if (linea.esManual) return linea;
-    const producto = listaVigente.items.find(function (p) { return p.articulo === linea.articulo; });
+    const producto = listaVigente.items.find(function (p) { return p.articulo === nombreEnLista(linea); });
     if (!producto) {
       return Object.assign({}, linea, { noEncontradoEnListaVigente: true });
     }
-    return crearLineaCarrito(producto, linea.cantidad);
+    const nueva = crearLineaCarrito(producto, linea.cantidad);
+    // Se conserva el nombre que se le puso a mano (si se lo renombró).
+    if (linea.articuloLista) {
+      nueva.articulo = linea.articulo;
+      nueva.articuloLista = linea.articuloLista;
+    }
+    return nueva;
   }
 
   /**
@@ -62,7 +90,7 @@
    * con esManual:true para que "Recalcular con lista vigente" la deje
    * intacta en vez de marcarla como "no encontrada".
    */
-  function crearLineaManual(nombre, cantidad, precioUnitario) {
+  function crearLineaManual(nombre, cantidad, precioUnitario, proveedor) {
     const cantidadFinal = Math.max(1, Math.floor(Number(cantidad) || 1));
     const precio = Math.max(0, Number(precioUnitario) || 0);
     return {
@@ -76,6 +104,7 @@
       importe: round2(precio * cantidadFinal),
       esManual: true,
       editadoManualmente: true,
+      proveedor: String(proveedor || '').trim(),
     };
   }
 
@@ -125,6 +154,8 @@
     crearLineaCarrito: crearLineaCarrito,
     crearLineaManual: crearLineaManual,
     recalcularLinea: recalcularLinea,
+    nombreEnLista: nombreEnLista,
+    renombrarLinea: renombrarLinea,
     marcarPrecioManual: marcarPrecioManual,
     recalcularImporteConPrecioActual: recalcularImporteConPrecioActual,
     calcularTotales: calcularTotales,

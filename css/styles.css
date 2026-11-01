@@ -140,6 +140,14 @@ input, textarea { font-family: inherit; }
   font-size: 0.95rem;
   background: var(--bg);
 }
+.buscador-wrap input#buscador-producto { padding-right: 48px; }
+.btn-voz {
+  position: absolute; top: 4px; right: 4px; width: 38px; height: 38px;
+  border: none; border-radius: 8px; background: transparent; font-size: 1.15rem; cursor: pointer;
+}
+.btn-voz:hover { background: var(--teal-tenue); }
+.btn-voz.escuchando { background: #fde2e2; animation: pulso-voz 1s infinite; }
+@keyframes pulso-voz { 50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.18); } }
 .buscador-wrap input:focus {
   outline: none;
   border-color: var(--teal);
@@ -201,6 +209,16 @@ td.vacio { text-align: center; color: var(--tinta-suave); padding: 24px 10px; fo
 
 .col-precio, .col-subtotal { font-family: var(--font-mono); text-align: right; white-space: nowrap; color: #000; }
 .col-producto { color: #000; font-weight: 500; }
+.col-producto .input-nombre,
+.col-producto .input-proveedor {
+  width: 100%; box-sizing: border-box; font: inherit; color: inherit;
+  padding: 6px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent;
+}
+.col-producto .input-nombre:hover { border-color: #d5d5d5; }
+.col-producto .input-nombre:focus,
+.col-producto .input-proveedor:focus { border-color: var(--violeta); background: #fff; outline: none; }
+.col-producto .input-proveedor { margin-top: 4px; font-size: 12px; font-weight: 400; border-color: #e3e3e3; background: #fafafa; }
+.nombre-lista-original { font-size: 11px; font-weight: 400; color: #777; padding: 2px 8px 0; }
 .col-cantidad { width: 90px; }
 .input-cantidad {
   width: 64px;
