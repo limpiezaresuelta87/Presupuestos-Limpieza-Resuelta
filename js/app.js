@@ -1863,6 +1863,7 @@
       }).catch(function () { /* no es importante */ });
     }
     Store.reconciliarClientesConHistorial();
+    Store.reconciliarNumeracionConHistorial();
     estadoApp.config = Store.obtenerConfig();
 
     Pricelist.cargarListaVigente()

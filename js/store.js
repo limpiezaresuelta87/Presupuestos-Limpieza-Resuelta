@@ -119,6 +119,16 @@
   // -----------------------------------------------------------------------
   // Cache en memoria + listeners en tiempo real
   // -----------------------------------------------------------------------
+  // PROTECCIÓN DE DATOS: en un dispositivo "nuevo" (o con los datos del
+  // navegador borrados) Firestore puede responder primero desde su caché
+  // vacía diciendo "este documento no existe", ANTES de traer la respuesta
+  // real del servidor. Si la app creía eso, "inicializaba" la configuración
+  // y la lista de clientes con valores de fábrica y PISABA los datos reales
+  // (numeración, clientes). Por eso estas dos banderas solo se activan
+  // cuando la respuesta viene confirmada por el servidor, y mientras no
+  // estén activas, la app no escribe nada automáticamente.
+  const confirmado = { config: false, clientes: false };
+
   const cache = {
     config: clonar(CONFIG_POR_DEFECTO),
     historial: [],       // incluye los de la papelera
@@ -144,8 +154,23 @@
     if (listenersIniciados) return;
     listenersIniciados = true;
 
+    // Sin conexión en un dispositivo sin datos guardados, el servidor nunca
+    // contesta: pasados unos segundos la app abre igual (con valores de
+    // fábrica en pantalla), pero como "confirmado" sigue en false, NO escribe
+    // nada automáticamente y no pisa los datos reales.
+    setTimeout(function () {
+      let cambio = false;
+      ['config', 'clientes'].forEach(function (k) {
+        if (!fuentesListas[k]) { fuentesListas[k] = true; cambio = true; }
+      });
+      if (cambio) chequearListo();
+    }, 8000);
+
     DOC_CONFIG.onSnapshot(function (snap) {
+      // "No existe" que viene solo de la caché local no es confiable: se espera al servidor.
+      if (!snap.exists && snap.metadata && snap.metadata.fromCache) return;
       cache.config = completarConfig(snap.exists ? snap.data() : null);
+      confirmado.config = true;
       fuentesListas.config = true;
       chequearListo();
     }, function (err) {
@@ -187,6 +212,8 @@
     });
 
     DOC_CLIENTES.onSnapshot(function (snap) {
+      if (!snap.exists && snap.metadata && snap.metadata.fromCache) return; // ver nota de "confirmado"
+      confirmado.clientes = true;
       const datos = snap.exists ? snap.data() : {};
       const nombres = Array.isArray(datos.nombres) ? datos.nombres : [];
       cache.clientes = nombres.slice().sort(function (a, b) { return a.localeCompare(b, 'es'); });
@@ -530,6 +557,7 @@
      * versión vieja), los vuelve a agregar. Devuelve cuántos recuperó.
      */
     reconciliarClientesConHistorial: function () {
+      if (!confirmado.clientes) return 0;
       const enLista = {};
       cache.clientes.forEach(function (n) { enLista[n] = true; });
       const faltantes = {};
@@ -544,6 +572,29 @@
         console.error('[store] No se pudo reparar la lista de clientes:', err);
       });
       return nombresFaltantes.length;
+    },
+
+    /**
+     * Autorreparación de la numeración: si el "próximo número" guardado es
+     * menor o igual al mayor número que ya existe en el historial (por
+     * ejemplo porque la configuración se reinició), lo sube a mayor + 1.
+     * Devuelve el próximo número, o null si no hizo falta tocar nada.
+     */
+    reconciliarNumeracionConHistorial: function () {
+      if (!confirmado.config) return null;
+      const config = completarConfig(cache.config);
+      const prefijo = String(config.numeracion.prefijo || '');
+      let maximo = 0;
+      cache.historial.forEach(function (p) {
+        const num = String(p && p.numero || '');
+        if (num.indexOf(prefijo) !== 0) return;
+        const m = num.slice(prefijo.length).match(/^(\d+)/);
+        if (m) maximo = Math.max(maximo, parseInt(m[1], 10));
+      });
+      if (config.numeracion.siguienteNumero > maximo) return null;
+      config.numeracion.siguienteNumero = maximo + 1;
+      this.guardarConfig(config);
+      return maximo + 1;
     },
 
     /** Contacto guardado de un cliente (teléfono/email/dirección habitual), o '' si no tiene. */
@@ -631,6 +682,7 @@
      * grave (a lo sumo se escribe el mismo número dos veces).
      */
     migrarSiNecesario: function () {
+      if (!confirmado.config || !confirmado.clientes) return; // datos sin confirmar: no se toca nada
       let version = this.obtenerVersionEsquema();
 
       // v1 -> v2: los presupuestos no tenían el campo enPapelera; no hace
