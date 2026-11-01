@@ -1573,6 +1573,7 @@
   // ---------------------------------------------------------------------
   function iniciar() {
     Store.migrarSiNecesario();
+    Store.reconciliarClientesConHistorial();
     estadoApp.config = Store.obtenerConfig();
 
     Pricelist.cargarListaVigente()

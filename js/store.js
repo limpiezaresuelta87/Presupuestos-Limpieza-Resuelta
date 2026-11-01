@@ -524,6 +524,28 @@
       return limpio;
     },
 
+    /**
+     * Autorreparación: si hay presupuestos de clientes que no figuran en la
+     * lista del desplegable (por ejemplo porque la lista se pisó con una
+     * versión vieja), los vuelve a agregar. Devuelve cuántos recuperó.
+     */
+    reconciliarClientesConHistorial: function () {
+      const enLista = {};
+      cache.clientes.forEach(function (n) { enLista[n] = true; });
+      const faltantes = {};
+      cache.historial.forEach(function (p) {
+        const n = p && p.cliente && String(p.cliente.nombre || '').trim().toUpperCase().replace(/\s+/g, ' ');
+        if (n && !enLista[n]) faltantes[n] = true;
+      });
+      const nombresFaltantes = Object.keys(faltantes);
+      if (nombresFaltantes.length === 0) return 0;
+      cache.clientes = cache.clientes.concat(nombresFaltantes).sort(function (a, b) { return a.localeCompare(b, 'es'); });
+      DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
+        console.error('[store] No se pudo reparar la lista de clientes:', err);
+      });
+      return nombresFaltantes.length;
+    },
+
     /** Contacto guardado de un cliente (teléfono/email/dirección habitual), o '' si no tiene. */
     obtenerContactoCliente: function (nombre) {
       return cache.contactosClientes[nombre] || '';
@@ -548,11 +570,17 @@
       return Object.assign({}, cache.contactosClientes);
     },
 
-    /** Reemplaza TODA la lista de clientes + contactos de una vez (usado al restaurar un backup). */
+    /**
+     * Restaura clientes y contactos desde un backup. NO reemplaza: suma los
+     * del backup a los que ya hay (nunca se pierde un cliente por importar
+     * un archivo viejo con menos clientes).
+     */
     restaurarClientes: function (datos) {
-      const nombres = (datos && Array.isArray(datos.nombres) ? datos.nombres : []).slice()
+      const delBackup = datos && Array.isArray(datos.nombres) ? datos.nombres : [];
+      const nombres = Array.from(new Set(cache.clientes.concat(delBackup)))
         .sort(function (a, b) { return a.localeCompare(b, 'es'); });
-      const contactos = (datos && datos.contactos && typeof datos.contactos === 'object') ? datos.contactos : {};
+      const contactosBackup = (datos && datos.contactos && typeof datos.contactos === 'object') ? datos.contactos : {};
+      const contactos = Object.assign({}, contactosBackup, cache.contactosClientes);
       cache.clientes = nombres;
       cache.contactosClientes = contactos;
       DOC_CLIENTES.set({ nombres: nombres, contactos: contactos }).catch(function (err) {
