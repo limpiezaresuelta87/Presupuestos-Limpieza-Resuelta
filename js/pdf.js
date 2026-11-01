@@ -197,6 +197,7 @@
 
     // Agrupar por proveedor, calculando costo unitario y costo total de cada línea
     const grupos = {};
+    const proveedoresOficiales = Array.from(new Set(Object.keys(mapaProveedores).map(function (k) { return mapaProveedores[k]; }).filter(Boolean)));
     let totalGeneral = 0;
     let totalGeneralCompleto = true; // se pone en false si falta el costo de algún artículo
     presupuesto.lineas.forEach(function (l) {
@@ -204,7 +205,14 @@
       // lista), manda ese; si no, el del mapa del Excel. Se busca por el
       // nombre de la lista, aunque la línea se haya renombrado.
       const nombreLista = l.articuloLista || l.articulo;
-      const proveedor = (l.proveedor && l.proveedor.trim()) || mapaProveedores[normalizar(nombreLista)] || (l.esManual ? OTROS_PROVEEDORES : SIN_PROVEEDOR);
+      // Si el proveedor escrito a mano es igual o parecido a uno oficial del
+      // Excel (ej. "Mundo vazar" -> "MundoBazar"), se agrupa con ese.
+      let proveedorManual = (l.proveedor || '').trim();
+      if (proveedorManual) {
+        const hallado = window.Quote.buscarProveedorParecido(proveedorManual, proveedoresOficiales);
+        if (hallado) proveedorManual = hallado.nombre;
+      }
+      const proveedor = proveedorManual || mapaProveedores[normalizar(nombreLista)] || (l.esManual ? OTROS_PROVEEDORES : SIN_PROVEEDOR);
       const costoUnitario = (obtenerCosto && !l.esManual) ? obtenerCosto(nombreLista) : null;
       const costoTotal = costoUnitario === null ? null : costoUnitario * l.cantidad;
       if (costoTotal === null) totalGeneralCompleto = false;
@@ -234,7 +242,7 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(15, 107, 92);
-      doc.text(proveedor === SIN_PROVEEDOR ? '⚠ ' + SIN_PROVEEDOR : proveedor, margenIzq, y);
+      doc.text(proveedor === SIN_PROVEEDOR ? '(!) ' + SIN_PROVEEDOR : proveedor, margenIzq, y);
       doc.setTextColor(0);
       y += 8;
 

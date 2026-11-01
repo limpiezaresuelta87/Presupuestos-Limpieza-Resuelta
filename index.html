@@ -403,15 +403,26 @@
 <div id="modal-proveedor" class="modal-fondo" style="display:none;">
   <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="prov-titulo">
     <h3 id="prov-titulo">¿De qué proveedor es?</h3>
-    <p class="modal-ayuda">Tocá el cuadro para ver los proveedores que ya tenemos, o escribí uno nuevo.</p>
-    <input type="text" id="prov-nuevo-nombre" list="prov-nuevo-lista" placeholder="Elegí uno o escribí el nombre" autocomplete="off" />
-    <datalist id="prov-nuevo-lista"></datalist>
-    <div class="modal-botones">
-      <button type="button" class="btn btn-primario" id="btn-prov-usar">Usar</button>
-      <button type="button" class="btn-mini" id="btn-prov-cancelar">Cancelar</button>
+    <div id="prov-entrada">
+      <p class="modal-ayuda">Tocá uno de los que ya tenemos, o escribí el nombre si es nuevo.</p>
+      <input type="text" id="prov-nuevo-nombre" placeholder="Nombre del proveedor nuevo" autocomplete="off" />
+      <div class="modal-botones">
+        <button type="button" class="btn btn-primario" id="btn-prov-usar">Usar</button>
+        <button type="button" class="btn-mini" id="btn-prov-cancelar">Cancelar</button>
+      </div>
+    </div>
+    <div id="prov-pregunta" style="display:none;">
+      <p class="modal-ayuda" id="prov-pregunta-texto"></p>
+      <div class="modal-botones">
+        <button type="button" class="btn btn-primario" id="btn-prov-si"></button>
+        <button type="button" class="btn" id="btn-prov-no"></button>
+        <button type="button" class="btn-mini" id="btn-prov-atras">Volver</button>
+      </div>
     </div>
   </div>
 </div>
+
+<div id="version-app" class="version-app"></div>
 
 <div id="toast" class="toast"></div>
 

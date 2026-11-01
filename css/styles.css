@@ -494,3 +494,4 @@ td.vacio { text-align: center; color: var(--tinta-suave); padding: 24px 10px; fo
 .prov-chip-activo { background: var(--teal); color: #fff; border-color: var(--teal); }
 .prov-chip-otro { border-style: dashed; }
 .lista-ortografia .orto-manual { width: 100%; flex-basis: 100%; margin-top: 4px; }
+.version-app { text-align: center; font-size: 11px; color: #999; padding: 12px 0 24px; }

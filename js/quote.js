@@ -127,6 +127,56 @@
     });
   }
 
+  // -------------------------------------------------------------------
+  // Proveedores: detectar que "Mundo vazar", "mundo bazar" o "MUNDOBAZAR"
+  // son el mismo proveedor que "MundoBazar", para no duplicarlos.
+  // -------------------------------------------------------------------
+  function claveProveedor(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  }
+
+  function distanciaEdicion(a, b) {
+    let prev = [];
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  /**
+   * Busca entre `candidatos` (nombres de proveedores, los oficiales primero)
+   * el que corresponde a `texto`. Devuelve null si no hay ninguno, o
+   * { nombre, tipo } con tipo 'exacto' (igual sin mayúsculas, espacios ni
+   * tildes) o 'parecido' (con un error de tipeo o una parte del nombre).
+   */
+  function buscarProveedorParecido(texto, candidatos) {
+    const k = claveProveedor(texto);
+    if (!k) return null;
+    const lista = (candidatos || []).filter(Boolean);
+    const exacto = lista.find(function (n) { return claveProveedor(n) === k; });
+    if (exacto) return { nombre: exacto, tipo: 'exacto' };
+    if (k.length < 5) return null; // nombres muy cortos (ej. "KB") solo se unen si son iguales
+    let mejor = null;
+    lista.forEach(function (n) {
+      const kn = claveProveedor(n);
+      if (kn.length < 5) return;
+      const maxDist = Math.max(k.length, kn.length) >= 8 ? 2 : 1;
+      const d = distanciaEdicion(k, kn);
+      const contenido = kn.indexOf(k) !== -1 || k.indexOf(kn) !== -1;
+      if (d <= maxDist || contenido) {
+        const puntaje = contenido ? 0 : d;
+        if (!mejor || puntaje < mejor.puntaje) mejor = { nombre: n, tipo: 'parecido', puntaje: puntaje };
+      }
+    });
+    return mejor ? { nombre: mejor.nombre, tipo: mejor.tipo } : null;
+  }
+
   /** Subtotal, descuento y total (presupuesto: sin impuestos). */
   function calcularTotales(lineas, descuentoPct) {
     descuentoPct = descuentoPct || 0;
@@ -155,6 +205,7 @@
     crearLineaManual: crearLineaManual,
     recalcularLinea: recalcularLinea,
     nombreEnLista: nombreEnLista,
+    buscarProveedorParecido: buscarProveedorParecido,
     renombrarLinea: renombrarLinea,
     marcarPrecioManual: marcarPrecioManual,
     recalcularImporteConPrecioActual: recalcularImporteConPrecioActual,

@@ -382,39 +382,38 @@
     return select;
   }
 
-  /** Distancia de edición entre dos textos (para detectar "Mundo Basar" ≈ "MundoBazar"). */
-  function distanciaEdicion(a, b) {
-    const m = a.length, n = b.length;
-    let prev = []; for (let j = 0; j <= n; j++) prev[j] = j;
-    for (let i = 1; i <= m; i++) {
-      const cur = [i];
-      for (let j = 1; j <= n; j++) {
-        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      }
-      prev = cur;
-    }
-    return prev[n];
+  /** Proveedores "oficiales": los que vienen del Excel (hojas de proveedores). */
+  function obtenerProveedoresOficiales() {
+    const mapa = Store.obtenerMapaProveedores();
+    return Array.from(new Set(Object.keys(mapa).map(function (k) { return mapa[k]; }).filter(Boolean)))
+      .sort(function (x, y) { return x.localeCompare(y, 'es'); });
   }
 
-  function claveProveedor(texto) {
-    return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  /** Si `texto` es igual o parecido a un proveedor oficial/conocido, devuelve ese; si no, el texto tal cual. */
+  function unificarProveedor(texto) {
+    const limpio = String(texto || '').trim();
+    if (!limpio) return '';
+    const oficiales = obtenerProveedoresOficiales();
+    const candidatos = oficiales.concat(obtenerProveedoresConocidos().filter(function (n) { return oficiales.indexOf(n) === -1; }));
+    const hallado = Quote.buscarProveedorParecido(limpio, candidatos);
+    return hallado ? hallado.nombre : limpio;
   }
 
   /**
    * Ventana para elegir "otro proveedor": primero muestra los que ya
-   * tenemos (un toque y listo); si es uno que no está, se escribe. Si lo
-   * escrito es igual o parecido a uno existente, usa el existente para no
-   * duplicar proveedores en la lista de compras. Llama a alTerminar con el
-   * nombre, o con null si cancelaron.
+   * tenemos (un toque y listo); si es uno que no está, se escribe.
+   * - Si lo escrito es igual a uno existente (sin importar mayúsculas,
+   *   espacios o tildes), se usa el existente, sin preguntar.
+   * - Si es parecido ("Mundo vazar"), pregunta con dos botones grandes:
+   *   "Sí, es MundoBazar" / "No, es uno nuevo".
+   * Llama a alTerminar con el nombre, o con null si cancelaron.
    */
   function pedirProveedorNuevo(alTerminar) {
     const modal = $('#modal-proveedor');
     const input = $('#prov-nuevo-nombre');
-    const datalist = $('#prov-nuevo-lista');
     const conocidos = obtenerProveedoresConocidos();
-
-    datalist.innerHTML = '';
-    conocidos.forEach(function (n) { datalist.appendChild(crearElemento('option', { value: n }, [])); });
+    const oficiales = obtenerProveedoresOficiales();
+    const candidatos = oficiales.concat(conocidos.filter(function (n) { return oficiales.indexOf(n) === -1; }));
 
     // Botones con los proveedores existentes (un toque para elegirlo)
     let chips = $('#prov-chips');
@@ -423,18 +422,23 @@
       input.parentNode.insertBefore(chips, input);
     }
     chips.innerHTML = '';
-    conocidos.forEach(function (n) {
+    candidatos.forEach(function (n) {
       chips.appendChild(crearElemento('button', { type: 'button', class: 'btn-mini prov-chip', onclick: function () { cerrar(n); } }, [n]));
     });
 
+    function mostrarEntrada() {
+      $('#prov-entrada').style.display = 'block';
+      $('#prov-pregunta').style.display = 'none';
+    }
+
     input.value = '';
+    mostrarEntrada();
     modal.style.display = 'flex';
     input.focus();
 
     function cerrar(resultado) {
       modal.style.display = 'none';
-      $('#btn-prov-usar').onclick = null;
-      $('#btn-prov-cancelar').onclick = null;
+      ['#btn-prov-usar', '#btn-prov-cancelar', '#btn-prov-si', '#btn-prov-no', '#btn-prov-atras'].forEach(function (sel) { $(sel).onclick = null; });
       input.onkeydown = null;
       alTerminar(resultado);
     }
@@ -442,18 +446,19 @@
     function usarEscrito() {
       const escrito = input.value.trim();
       if (!escrito) { mostrarAviso('Elegí un proveedor o escribí el nombre.', true); return; }
-      const k = claveProveedor(escrito);
-      const igual = conocidos.find(function (n) { return claveProveedor(n) === k; });
-      if (igual) { cerrar(igual); return; }
-      const parecido = conocidos.find(function (n) {
-        const kn = claveProveedor(n);
-        return k.length >= 4 && (distanciaEdicion(k, kn) <= 2 || kn.indexOf(k) !== -1 || k.indexOf(kn) !== -1);
-      });
-      if (parecido && window.confirm('¿Quisiste decir "' + parecido + '"?\n\nAceptar: usar "' + parecido + '".\nCancelar: crear "' + escrito + '" como proveedor nuevo.')) {
-        cerrar(parecido);
-        return;
-      }
-      cerrar(escrito);
+      const hallado = Quote.buscarProveedorParecido(escrito, candidatos);
+      if (!hallado) { cerrar(escrito); return; }
+      if (hallado.tipo === 'exacto') { cerrar(hallado.nombre); return; }
+
+      // Parecido: preguntar con botones grandes (no con un cuadro del navegador)
+      $('#prov-entrada').style.display = 'none';
+      $('#prov-pregunta').style.display = 'block';
+      $('#prov-pregunta-texto').textContent = 'Escribiste "' + escrito + '". ¿Es el proveedor "' + hallado.nombre + '"?';
+      $('#btn-prov-si').textContent = 'Sí, es ' + hallado.nombre;
+      $('#btn-prov-no').textContent = 'No, crear "' + escrito + '"';
+      $('#btn-prov-si').onclick = function () { cerrar(hallado.nombre); };
+      $('#btn-prov-no').onclick = function () { cerrar(escrito); };
+      $('#btn-prov-atras').onclick = function () { mostrarEntrada(); input.focus(); };
     }
 
     $('#btn-prov-usar').onclick = usarEscrito;
@@ -1012,7 +1017,10 @@
           // Las líneas quedan ordenadas alfabéticamente por producto (A a Z)
           // al guardar. Esto es lo que después se ve en el historial y en el
           // PDF (cantidades y precios de cada línea no se tocan, solo el orden).
-          lineas: JSON.parse(JSON.stringify(estadoApp.carrito)).sort(function (a, b) {
+          lineas: JSON.parse(JSON.stringify(estadoApp.carrito)).map(function (l) {
+            if (l.proveedor) l.proveedor = unificarProveedor(l.proveedor);
+            return l;
+          }).sort(function (a, b) {
             return a.articulo.localeCompare(b.articulo, 'es', { sensitivity: 'base' });
           }),
         },
@@ -1846,6 +1854,14 @@
   // ---------------------------------------------------------------------
   function iniciar() {
     Store.migrarSiNecesario();
+    // Muestra qué versión de la app se está usando (sirve para saber si el celu ya bajó la última).
+    if (window.caches && caches.keys) {
+      caches.keys().then(function (claves) {
+        const c = claves.filter(function (k) { return k.indexOf('presupuestos-cache-') === 0; }).pop();
+        const el = $('#version-app');
+        if (c && el) el.textContent = 'Versión ' + c.replace('presupuestos-cache-', '').slice(0, 7);
+      }).catch(function () { /* no es importante */ });
+    }
     Store.reconciliarClientesConHistorial();
     estadoApp.config = Store.obtenerConfig();
 
