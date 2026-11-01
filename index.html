@@ -384,6 +384,34 @@
 
 </main>
 
+<!-- Revisión ortográfica antes de guardar -->
+<div id="modal-ortografia" class="modal-fondo" style="display:none;">
+  <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="orto-titulo">
+    <h3 id="orto-titulo">Revisá la ortografía</h3>
+    <p class="modal-ayuda">Estas palabras podrían estar mal escritas. Elegí la corrección en cada una, o dejala como está si es correcta.</p>
+    <ul id="lista-ortografia" class="lista-ortografia"></ul>
+    <div class="modal-botones">
+      <button type="button" class="btn btn-primario" id="btn-orto-corregir">Aplicar y seguir</button>
+      <button type="button" class="btn" id="btn-orto-ignorar">Seguir sin corregir</button>
+      <button type="button" class="btn-mini" id="btn-orto-volver">Volver a editar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Alta de proveedor nuevo (muestra primero los que ya existen) -->
+<div id="modal-proveedor" class="modal-fondo" style="display:none;">
+  <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="prov-titulo">
+    <h3 id="prov-titulo">¿De qué proveedor es?</h3>
+    <p class="modal-ayuda">Tocá el cuadro para ver los proveedores que ya tenemos, o escribí uno nuevo.</p>
+    <input type="text" id="prov-nuevo-nombre" list="prov-nuevo-lista" placeholder="Elegí uno o escribí el nombre" autocomplete="off" />
+    <datalist id="prov-nuevo-lista"></datalist>
+    <div class="modal-botones">
+      <button type="button" class="btn btn-primario" id="btn-prov-usar">Usar</button>
+      <button type="button" class="btn-mini" id="btn-prov-cancelar">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <!-- Librerías gratuitas (MIT/Apache) por CDN -->
@@ -406,6 +434,8 @@
 <script src="js/pricelist.js"></script>
 <script src="js/quote.js"></script>
 <script src="js/pdf.js"></script>
+<script src="vendor/nspell.min.js"></script>
+<script src="js/corrector.js"></script>
 <script src="js/app.js"></script>
 
 <!-- PWA: registra el service worker para que la app funcione sin conexión.

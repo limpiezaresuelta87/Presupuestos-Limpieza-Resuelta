@@ -37,6 +37,7 @@ const APP_SHELL = [
   './js/pricelist.js',
   './js/quote.js',
   './js/pdf.js',
+  './js/corrector.js',
   './js/app.js',
   './js/informes.js',
 
@@ -51,6 +52,9 @@ const APP_SHELL = [
   './vendor/jspdf.umd.min.js',
   './vendor/jspdf.plugin.autotable.min.js',
   './vendor/chart.umd.js',
+  './vendor/nspell.min.js',
+  './vendor/es.aff',
+  './vendor/es.dic',
 
   // Firebase (compat, por CDN)
   'https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js',

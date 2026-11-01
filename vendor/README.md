@@ -44,3 +44,15 @@ Después actualizar la lista `APP_SHELL` en `service-worker.js` solo si
 cambia el NOMBRE del archivo (no hace falta si el nombre queda igual --
 el propio `CACHE_VERSION` del service worker ya fuerza a todos los
 navegadores a bajar la versión nueva en el próximo deploy).
+
+## Corrector ortográfico (agregado en noviembre de 2026)
+
+| Archivo                  | Qué es                                                        | Versión |
+|--------------------------|---------------------------------------------------------------|---------|
+| `nspell.min.js`          | nspell (motor de corrección tipo Hunspell, licencia MIT)      | 2.1.5   |
+| `es.aff`, `es.dic`       | Diccionario de español (`dictionary-es`, de LibreOffice)      | npm     |
+| `es-LICENSE.txt`         | Licencia del diccionario                                      |         |
+
+Los usa `js/corrector.js` para avisar de palabras mal escritas al guardar un
+presupuesto. Se descargan una sola vez y quedan guardados para usar sin internet.
+`nspell.min.js` se generó con esbuild a partir de `nspell/lib/index.js` (nombre global `nspellLib`).

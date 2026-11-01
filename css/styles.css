@@ -464,3 +464,30 @@ td.vacio { text-align: center; color: var(--tinta-suave); padding: 24px 10px; fo
   .resultado-item { flex-direction: column; align-items: flex-start; gap: 2px; }
   .resultado-precio { white-space: normal; }
 }
+
+/* ---------- Ventanas emergentes (ortografía, proveedor nuevo) ---------- */
+.modal-fondo {
+  position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal-caja {
+  background: #fff; border-radius: 12px; padding: 20px; width: 100%; max-width: 520px;
+  max-height: 85vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.modal-caja h3 { margin: 0 0 6px; font-size: 1.1rem; }
+.modal-ayuda { margin: 0 0 12px; color: #666; font-size: 0.9rem; }
+.modal-caja input[type="text"] {
+  width: 100%; box-sizing: border-box; padding: 11px 12px; font-size: 1rem;
+  border: 1px solid var(--linea); border-radius: 8px;
+}
+.modal-botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+.lista-ortografia { list-style: none; margin: 0; padding: 0; }
+.lista-ortografia li {
+  display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-bottom: 1px solid #eee; flex-wrap: wrap;
+}
+.lista-ortografia .orto-palabra { font-weight: 600; color: #b42318; }
+.lista-ortografia .orto-donde { display: block; font-size: 0.75rem; font-weight: 400; color: #888; }
+.lista-ortografia select { padding: 8px; border: 1px solid var(--linea); border-radius: 8px; font-size: 0.9rem; max-width: 55%; }
+.prov-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.prov-chip { padding: 8px 14px; font-size: 0.95rem; }

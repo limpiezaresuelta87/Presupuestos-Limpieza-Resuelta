@@ -382,13 +382,223 @@
     return select;
   }
 
-  /** Si eligieron "Otro proveedor…" pide el nombre; devuelve el valor final (o null si cancelaron). */
-  function resolverProveedorElegido(select, valorAnterior) {
-    if (select.value !== OPCION_OTRO_PROVEEDOR) return select.value;
-    const nombre = (window.prompt('Nombre del proveedor nuevo:') || '').trim();
-    if (!nombre) { llenarSelectorProveedor(select, valorAnterior || ''); return null; }
-    llenarSelectorProveedor(select, nombre);
-    return nombre;
+  /** Distancia de edición entre dos textos (para detectar "Mundo Basar" ≈ "MundoBazar"). */
+  function distanciaEdicion(a, b) {
+    const m = a.length, n = b.length;
+    let prev = []; for (let j = 0; j <= n; j++) prev[j] = j;
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = cur;
+    }
+    return prev[n];
+  }
+
+  function claveProveedor(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  }
+
+  /**
+   * Ventana para elegir "otro proveedor": primero muestra los que ya
+   * tenemos (un toque y listo); si es uno que no está, se escribe. Si lo
+   * escrito es igual o parecido a uno existente, usa el existente para no
+   * duplicar proveedores en la lista de compras. Llama a alTerminar con el
+   * nombre, o con null si cancelaron.
+   */
+  function pedirProveedorNuevo(alTerminar) {
+    const modal = $('#modal-proveedor');
+    const input = $('#prov-nuevo-nombre');
+    const datalist = $('#prov-nuevo-lista');
+    const conocidos = obtenerProveedoresConocidos();
+
+    datalist.innerHTML = '';
+    conocidos.forEach(function (n) { datalist.appendChild(crearElemento('option', { value: n }, [])); });
+
+    // Botones con los proveedores existentes (un toque para elegirlo)
+    let chips = $('#prov-chips');
+    if (!chips) {
+      chips = crearElemento('div', { id: 'prov-chips', class: 'prov-chips' }, []);
+      input.parentNode.insertBefore(chips, input);
+    }
+    chips.innerHTML = '';
+    conocidos.forEach(function (n) {
+      chips.appendChild(crearElemento('button', { type: 'button', class: 'btn-mini prov-chip', onclick: function () { cerrar(n); } }, [n]));
+    });
+
+    input.value = '';
+    modal.style.display = 'flex';
+    input.focus();
+
+    function cerrar(resultado) {
+      modal.style.display = 'none';
+      $('#btn-prov-usar').onclick = null;
+      $('#btn-prov-cancelar').onclick = null;
+      input.onkeydown = null;
+      alTerminar(resultado);
+    }
+
+    function usarEscrito() {
+      const escrito = input.value.trim();
+      if (!escrito) { mostrarAviso('Elegí un proveedor o escribí el nombre.', true); return; }
+      const k = claveProveedor(escrito);
+      const igual = conocidos.find(function (n) { return claveProveedor(n) === k; });
+      if (igual) { cerrar(igual); return; }
+      const parecido = conocidos.find(function (n) {
+        const kn = claveProveedor(n);
+        return k.length >= 4 && (distanciaEdicion(k, kn) <= 2 || kn.indexOf(k) !== -1 || k.indexOf(kn) !== -1);
+      });
+      if (parecido && window.confirm('¿Quisiste decir "' + parecido + '"?\n\nAceptar: usar "' + parecido + '".\nCancelar: crear "' + escrito + '" como proveedor nuevo.')) {
+        cerrar(parecido);
+        return;
+      }
+      cerrar(escrito);
+    }
+
+    $('#btn-prov-usar').onclick = usarEscrito;
+    $('#btn-prov-cancelar').onclick = function () { cerrar(null); };
+    input.onkeydown = function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); usarEscrito(); }
+      if (e.key === 'Escape') { e.preventDefault(); cerrar(null); }
+    };
+  }
+
+  /**
+   * Maneja el cambio de un desplegable de proveedor. Si eligieron "Otro
+   * proveedor…" abre la ventana de arriba; si no, usa el valor elegido.
+   */
+  function manejarCambioSelectorProveedor(select, valorAnterior, alConfirmar) {
+    if (select.value !== OPCION_OTRO_PROVEEDOR) { alConfirmar(select.value); return; }
+    pedirProveedorNuevo(function (nombre) {
+      if (nombre === null) { llenarSelectorProveedor(select, valorAnterior || ''); return; }
+      llenarSelectorProveedor(select, nombre);
+      alConfirmar(nombre);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Revisión ortográfica antes de guardar (corrector propio, ver
+  // js/corrector.js). Revisa lo que se escribe a mano: nombres de
+  // artículos manuales o renombrados, observaciones y condiciones de pago.
+  // No revisa los nombres que vienen del Excel, ni clientes ni proveedores.
+  // ---------------------------------------------------------------------
+  function construirPalabrasAIgnorar() {
+    const ignorar = new Set();
+    function agregar(texto) {
+      (String(texto || '').match(/[\p{L}\p{N}]+/gu) || []).forEach(function (p) { ignorar.add(Corrector.clave(p)); });
+    }
+    if (estadoApp.listaPrecios && estadoApp.listaPrecios.items) {
+      estadoApp.listaPrecios.items.forEach(function (i) { agregar(i.articulo); });
+    }
+    Store.obtenerClientes().forEach(agregar);
+    obtenerProveedoresConocidos().forEach(agregar);
+    (Store.obtenerConfig().palabrasPropias || []).forEach(function (p) { ignorar.add(Corrector.clave(p)); });
+    return ignorar;
+  }
+
+  function recolectarTextosParaRevisar() {
+    const fuentes = [];
+    estadoApp.carrito.forEach(function (linea, idx) {
+      if (!linea.esManual && !linea.articuloLista) return; // los del Excel no se revisan
+      fuentes.push({
+        donde: 'Artículo',
+        leer: function () { return estadoApp.carrito[idx].articulo; },
+        escribir: function (v) { estadoApp.carrito[idx] = Quote.renombrarLinea(estadoApp.carrito[idx], String(v).toLocaleUpperCase('es')); },
+      });
+    });
+    fuentes.push({
+      donde: 'Observaciones',
+      leer: function () { return $('#input-observaciones').value; },
+      escribir: function (v) { $('#input-observaciones').value = v; },
+    });
+    fuentes.push({
+      donde: 'Condiciones de pago',
+      leer: function () { return $('#input-condiciones').value; },
+      escribir: function (v) { $('#input-condiciones').value = v; },
+    });
+    return fuentes;
+  }
+
+  /** Muestra la ventana con las palabras dudosas. Resuelve true (seguir) o false (volver a editar). */
+  function mostrarVentanaOrtografia(items) {
+    return new Promise(function (resolve) {
+      const modal = $('#modal-ortografia');
+      const lista = $('#lista-ortografia');
+      lista.innerHTML = '';
+      const selectores = [];
+
+      items.forEach(function (item) {
+        const select = crearElemento('select', {}, []);
+        if (item.sugerencias.length) {
+          select.appendChild(crearElemento('option', { value: '' }, ['Corregir a…']));
+          item.sugerencias.forEach(function (s) { select.appendChild(crearElemento('option', { value: 'sug:' + s }, [s])); });
+        }
+        select.appendChild(crearElemento('option', { value: 'dejar' }, ['Está bien así']));
+        select.appendChild(crearElemento('option', { value: 'agregar' }, ['Está bien, agregar al diccionario']));
+        select.value = item.sugerencias.length ? '' : 'dejar';
+        selectores.push(select);
+        lista.appendChild(crearElemento('li', {}, [
+          crearElemento('span', { class: 'orto-palabra' }, [item.palabra, crearElemento('span', { class: 'orto-donde' }, [item.fuente.donde])]),
+          select,
+        ]));
+      });
+
+      function cerrar(resultado) {
+        modal.style.display = 'none';
+        $('#btn-orto-corregir').onclick = null;
+        $('#btn-orto-ignorar').onclick = null;
+        $('#btn-orto-volver').onclick = null;
+        resolve(resultado);
+      }
+
+      $('#btn-orto-corregir').onclick = function () {
+        const nuevas = [];
+        items.forEach(function (item, i) {
+          const v = selectores[i].value;
+          if (v.indexOf('sug:') === 0) {
+            item.fuente.escribir(Corrector.reemplazarPalabra(item.fuente.leer(), item.palabra, v.slice(4)));
+          } else if (v === 'agregar') {
+            nuevas.push(item.palabra.toLowerCase());
+          }
+        });
+        if (nuevas.length) {
+          const config = Store.obtenerConfig();
+          const actuales = config.palabrasPropias || [];
+          config.palabrasPropias = Array.from(new Set(actuales.concat(nuevas)));
+          Store.guardarConfig(config);
+        }
+        renderCarrito();
+        cerrar(true);
+      };
+      $('#btn-orto-ignorar').onclick = function () { cerrar(true); };
+      $('#btn-orto-volver').onclick = function () { cerrar(false); };
+      modal.style.display = 'flex';
+    });
+  }
+
+  /** Devuelve una promesa: true si se puede seguir guardando, false si prefiere volver a editar. */
+  function revisarOrtografia() {
+    return Corrector.cargar().then(function () {
+      const ignorar = construirPalabrasAIgnorar();
+      const items = [];
+      recolectarTextosParaRevisar().forEach(function (fuente) {
+        Corrector.revisarTexto(fuente.leer(), ignorar).forEach(function (e) {
+          items.push({ fuente: fuente, palabra: e.palabra, sugerencias: e.sugerencias });
+        });
+      });
+      return items.length ? mostrarVentanaOrtografia(items) : true;
+    }).catch(function (err) {
+      // Si el diccionario no se pudo cargar, no se bloquea el guardado.
+      console.warn('[corrector] No se pudo revisar la ortografía:', err);
+      return true;
+    });
+  }
+
+  function revisarYConfirmarGuardado() {
+    return revisarOrtografia().then(function (seguir) {
+      return seguir && window.confirm('¿Desea guardar el presupuesto?');
+    });
   }
 
   function actualizarSugerenciasProveedor() {
@@ -411,7 +621,7 @@
 
     // Si en el desplegable eligen "+ Otro proveedor…", se pide el nombre en el momento.
     $('#manual-proveedor').addEventListener('change', function (e) {
-      resolverProveedorElegido(e.target, '');
+      manejarCambioSelectorProveedor(e.target, '', function () { /* el valor queda elegido en el desplegable */ });
     });
 
     $('#btn-agregar-manual').addEventListener('click', function () {
@@ -504,8 +714,9 @@
                 });
                 llenarSelectorProveedor(sel, linea.proveedor || '');
                 sel.addEventListener('change', function () {
-                  const valor = resolverProveedorElegido(sel, linea.proveedor || '');
-                  if (valor !== null) actualizarProveedorLinea(idx, valor);
+                  manejarCambioSelectorProveedor(sel, linea.proveedor || '', function (valor) {
+                    actualizarProveedorLinea(idx, valor);
+                  });
                 });
                 return sel;
               })()
@@ -663,8 +874,9 @@
       }
       // Se pregunta ANTES de armar el presupuesto: así, si contesta que no,
       // no se gasta un número correlativo por nada.
-      if (!window.confirm('¿Desea guardar el presupuesto?')) return;
-      armarPresupuestoDesdeFormulario({}).then(function (presupuesto) {
+      revisarYConfirmarGuardado().then(function (ok) {
+        return ok ? armarPresupuestoDesdeFormulario({}) : null;
+      }).then(function (presupuesto) {
         if (!presupuesto) return;
         Store.guardarPresupuesto(presupuesto);
         mostrarAviso('Presupuesto ' + presupuesto.numero + ' guardado en el historial.');
@@ -691,8 +903,9 @@
         mostrarAviso('Agregá al menos un producto antes de generar el presupuesto.', true);
         return;
       }
-      if (!window.confirm('¿Desea guardar el presupuesto?')) return;
-      armarPresupuestoDesdeFormulario({}).then(function (presupuesto) {
+      revisarYConfirmarGuardado().then(function (ok) {
+        return ok ? armarPresupuestoDesdeFormulario({}) : null;
+      }).then(function (presupuesto) {
         if (!presupuesto) return;
         Store.guardarPresupuesto(presupuesto);
         descargarPDF(presupuesto);
