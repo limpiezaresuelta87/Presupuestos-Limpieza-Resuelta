@@ -197,7 +197,10 @@
 
     // Agrupar por proveedor, calculando costo unitario y costo total de cada línea
     const grupos = {};
-    const proveedoresOficiales = Array.from(new Set(Object.keys(mapaProveedores).map(function (k) { return mapaProveedores[k]; }).filter(Boolean)));
+    // Un mapa guardado con una hoja de costos como "proveedor" (error de una
+    // carga anterior del Excel) no sirve para agrupar: se lo ignora.
+    const esNombreValido = function (p) { return !!p && !/costo/i.test(String(p)); };
+    const proveedoresOficiales = Array.from(new Set(Object.keys(mapaProveedores).map(function (k) { return mapaProveedores[k]; }).filter(esNombreValido)));
     let totalGeneral = 0;
     let totalGeneralCompleto = true; // se pone en false si falta el costo de algún artículo
     presupuesto.lineas.forEach(function (l) {
@@ -212,8 +215,10 @@
         const hallado = window.Quote.buscarProveedorParecido(proveedorManual, proveedoresOficiales);
         if (hallado) proveedorManual = hallado.nombre;
       }
-      const proveedor = proveedorManual || mapaProveedores[normalizar(nombreLista)] || (l.esManual ? OTROS_PROVEEDORES : SIN_PROVEEDOR);
-      const costoUnitario = (obtenerCosto && !l.esManual) ? obtenerCosto(nombreLista) : null;
+      const delMapa = mapaProveedores[normalizar(nombreLista)];
+      const proveedor = proveedorManual || (esNombreValido(delMapa) ? delMapa : '') || (l.esManual ? OTROS_PROVEEDORES : SIN_PROVEEDOR);
+      let costoUnitario = (obtenerCosto && !l.esManual) ? obtenerCosto(nombreLista) : null;
+      if (!(costoUnitario > 0)) costoUnitario = null; // costo en cero = costo no cargado, nunca "$ 0,00"
       const costoTotal = costoUnitario === null ? null : costoUnitario * l.cantidad;
       if (costoTotal === null) totalGeneralCompleto = false;
       else totalGeneral += costoTotal;
@@ -253,8 +258,8 @@
           return [
             l.articulo,
             String(l.cantidad),
-            l.costoUnitario === null ? '—' : formatoMoneda(l.costoUnitario),
-            l.costoTotal === null ? '—' : formatoMoneda(l.costoTotal),
+            l.costoUnitario === null ? 'Sin costo' : formatoMoneda(l.costoUnitario),
+            l.costoTotal === null ? 'Sin costo' : formatoMoneda(l.costoTotal),
           ];
         }),
         margin: { left: margenIzq, right: 40 },
@@ -286,7 +291,7 @@
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.text(
-      'TOTAL ESTIMADO A COMPRAR: ' + formatoMoneda(totalGeneral) + (totalGeneralCompleto ? '' : ' (incompleto)'),
+      'TOTAL ESTIMADO A COMPRAR: ' + (totalGeneral > 0 ? formatoMoneda(totalGeneral) : 'sin costos cargados') + (totalGeneralCompleto ? '' : ' (incompleto)'),
       margenIzq, y
     );
     if (!totalGeneralCompleto) {

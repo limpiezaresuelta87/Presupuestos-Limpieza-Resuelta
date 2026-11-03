@@ -1761,9 +1761,17 @@
           $('#lp-estado').textContent =
             'Lista actualizada: ' + resultado.lista.items.length + ' artículos cargados' +
             (resultado.filasIgnoradas ? ' (' + resultado.filasIgnoradas + ' filas ignoradas por datos incompletos).' : '.') +
-            (resultado.snapshotCostos
-              ? ' También se guardó el costo de ' + resultado.snapshotCostos.items.length + ' artículos para Informes.'
-              : ' (No se encontró/validó una hoja de costos en este archivo; los informes de ganancia no se actualizaron.)') +
+            (resultado.articulosConCosto > 0
+              ? ' También se guardó el costo de ' + resultado.articulosConCosto + ' artículos (para Informes y Lista de compras)' +
+                (resultado.costosDesdeHojaCostos ? '.' : ' — la hoja de costos no se pudo leer, así que se tomaron de las hojas de cada proveedor.')
+              : ' ⚠ NO se pudo leer ningún costo de este archivo: la Lista de compras va a salir sin costos. Revisá que las hojas de proveedores tengan los costos cargados.') +
+            (resultado.articulosConCosto > 0 && resultado.articulosSinCosto && resultado.articulosSinCosto.length > 0
+              ? ' ⚠ ' + resultado.articulosSinCosto.length + ' artículo(s) sin costo cargado (ej.: ' +
+                resultado.articulosSinCosto.slice(0, 5).join(', ') + (resultado.articulosSinCosto.length > 5 ? '…' : '') + ').'
+              : '') +
+            (resultado.mapaProveedoresActualizado === false
+              ? ' ⚠ No se pudo detectar el proveedor de ningún artículo: se conservó el mapa de proveedores anterior.'
+              : '') +
             (resultado.sinProveedor && resultado.sinProveedor.length > 0
               ? ' ⚠ ' + resultado.sinProveedor.length + ' artículo(s) sin proveedor detectado (nombre distinto entre hojas): ' +
                 resultado.sinProveedor.slice(0, 8).join(', ') + (resultado.sinProveedor.length > 8 ? '…' : '') +

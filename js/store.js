@@ -532,10 +532,31 @@
      * no aparece en el snapshot encontrado.
      */
     obtenerCostoDeArticulo: function (articulo, fechaIso) {
-      const snap = this.obtenerSnapshotCostosMasCercano(fechaIso);
-      if (!snap) return null;
-      const item = snap.items.find(function (it) { return it.articulo === articulo; });
-      return item && item.costoUnitario !== undefined ? item.costoUnitario : null;
+      const historial = this.obtenerHistorialCostos();
+      if (historial.length === 0) return null;
+      // Snapshot vigente en esa fecha (el más nuevo con fecha <= la buscada)
+      let desde = -1;
+      historial.forEach(function (s, i) { if (!fechaIso || s.fecha <= fechaIso) desde = i; });
+      if (desde === -1) desde = historial.length - 1;
+
+      function costoEn(snap) {
+        const item = (snap.items || []).find(function (it) { return it.articulo === articulo; });
+        // Un costo vacío o en cero NO es un costo: se sigue buscando.
+        return item && item.costoUnitario > 0 ? item.costoUnitario : null;
+      }
+      // Primero el snapshot vigente y los anteriores (del más nuevo al más
+      // viejo); si ninguno tiene costo para este artículo, los posteriores.
+      // Así, un Excel subido sin costos legibles no "tapa" los costos que ya
+      // estaban guardados de una carga anterior.
+      for (let i = desde; i >= 0; i--) {
+        const c = costoEn(historial[i]);
+        if (c !== null) return c;
+      }
+      for (let i = desde + 1; i < historial.length; i++) {
+        const c = costoEn(historial[i]);
+        if (c !== null) return c;
+      }
+      return null;
     },
 
     // -------------------------------------------------------------------
