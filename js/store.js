@@ -190,6 +190,8 @@
     });
 
     DOC_LISTA_PRECIOS.onSnapshot(function (snap) {
+      // "No existe" que viene solo de la caché local no es confiable: se espera al servidor.
+      if (!snap.exists && snap.metadata && snap.metadata.fromCache) return;
       cache.listaPrecios = snap.exists ? snap.data() : null;
       fuentesListas.listaPrecios = true;
       chequearListo();
@@ -472,6 +474,15 @@
     },
 
     guardarListaPrecios: function (lista) {
+      // Antes de pisar la lista vigente, se archiva la anterior (nunca se pierde ninguna).
+      const anterior = cache.listaPrecios;
+      if (anterior && Array.isArray(anterior.items) && anterior.items.length > 0) {
+        db.collection('listaPreciosHistorial').add(Object.assign({}, clonar(anterior), {
+          archivadaEl: new Date().toISOString(),
+        })).catch(function (err) {
+          console.error('[store] No se pudo archivar la lista anterior:', err);
+        });
+      }
       cache.listaPrecios = lista;
       DOC_LISTA_PRECIOS.set(lista).catch(function (err) {
         console.error('[store] No se pudo guardar la lista de precios:', err);

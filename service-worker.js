@@ -31,8 +31,6 @@ const APP_SHELL = [
 
   './css/styles.css',
   './css/informes.css',
-
-  './js/data-precios-iniciales.js',
   './js/store.js',
   './js/pricelist.js',
   './js/quote.js',

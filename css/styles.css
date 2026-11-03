@@ -495,3 +495,8 @@ td.vacio { text-align: center; color: var(--tinta-suave); padding: 24px 10px; fo
 .prov-chip-otro { border-style: dashed; }
 .lista-ortografia .orto-manual { width: 100%; flex-basis: 100%; margin-top: 4px; }
 .version-app { text-align: center; font-size: 11px; color: #999; padding: 12px 0 24px; }
+
+/* Cartel fijo con la lista de precios en uso */
+.aviso-lista { padding: 6px 16px; font-size: 13px; }
+.aviso-lista-ok { background: #eef6ee; color: #2e6b34; }
+.aviso-lista-mal { background: #c62828; color: #fff; font-weight: 700; }

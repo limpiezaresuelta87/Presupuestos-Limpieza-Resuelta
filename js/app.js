@@ -1709,7 +1709,25 @@
   // ---------------------------------------------------------------------
   // Lista de precios
   // ---------------------------------------------------------------------
+  /** Cartel fijo arriba: qué lista se está usando y desde cuándo; rojo si es vieja o no hay. */
+  function renderAvisoLista() {
+    const el = $('#aviso-lista');
+    if (!el) return;
+    const lista = estadoApp.listaPrecios;
+    if (!lista || !lista.items || lista.items.length === 0) {
+      el.className = 'aviso-lista aviso-lista-mal';
+      el.textContent = '⚠ NO HAY LISTA DE PRECIOS CARGADA. No se puede presupuestar: subí el Excel en la pestaña "Lista de precios".';
+      return;
+    }
+    const dias = Math.floor((Date.now() - new Date(lista.actualizado).getTime()) / 86400000);
+    const vieja = !(dias <= 35);
+    el.className = 'aviso-lista ' + (vieja ? 'aviso-lista-mal' : 'aviso-lista-ok');
+    el.textContent = (vieja ? '⚠ LISTA VIEJA (' + dias + ' días) — verificá que sea la correcta. ' : 'Lista vigente: ') +
+      (lista.origenArchivo || '—') + ' · cargada el ' + Quote.formatoFecha(lista.actualizado);
+  }
+
   function renderListaPreciosInfo() {
+    renderAvisoLista();
     const lista = estadoApp.listaPrecios;
     $('#lp-origen').textContent = (lista && lista.origenArchivo) || '—';
     $('#lp-fecha').textContent = (lista && lista.actualizado) ? Quote.formatoFecha(lista.actualizado) : '—';
@@ -1872,7 +1890,7 @@
       })
       .catch(function (err) {
         console.error(err);
-        mostrarAviso('No se pudo cargar la lista de precios inicial. Cargá un Excel en la pestaña "Lista de precios".', true);
+        mostrarAviso('No hay lista de precios cargada. Subí el Excel en la pestaña "Lista de precios".', true);
         estadoApp.listaPrecios = { actualizado: null, origenArchivo: null, items: [] };
       })
       .then(function () {

@@ -279,18 +279,18 @@
     });
   }
 
-  /** Carga la lista vigente: la del cache local, o si no existe, la semilla embebida en el JS. */
+  /**
+   * Devuelve la lista vigente guardada en Firestore. Si todavía no hay
+   * ninguna, NO inventa una: avisa que hay que cargar el Excel. (Antes se
+   * usaba una lista "semilla" vieja y se grababa sobre la real: eso pisó la
+   * lista de septiembre con la de julio.)
+   */
   function cargarListaVigente() {
     const cache = window.Store.obtenerListaPrecios();
     if (cache && Array.isArray(cache.items) && cache.items.length > 0) {
       return Promise.resolve(cache);
     }
-    const semilla = window.PRECIOS_INICIALES;
-    if (!semilla || !Array.isArray(semilla.items)) {
-      return Promise.reject(new Error('No hay lista de precios en caché ni semilla incluida.'));
-    }
-    window.Store.guardarListaPrecios(semilla);
-    return Promise.resolve(semilla);
+    return Promise.reject(new Error('No hay lista de precios cargada.'));
   }
 
   function actualizarListaDesdeArchivo(file) {
