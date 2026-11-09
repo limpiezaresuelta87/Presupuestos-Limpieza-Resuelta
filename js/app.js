@@ -79,6 +79,7 @@
     if (tabId === 'historial') renderHistorial();
     if (tabId === 'configuracion') renderConfiguracion();
     if (tabId === 'lista-precios') renderListaPreciosInfo();
+    if (tabId === 'clientes') renderClientes();
   }
 
   // ---------------------------------------------------------------------
@@ -297,7 +298,10 @@
     if (idx < 0 || idx >= estadoApp.carrito.length) return;
     const cantidad = Math.max(1, Math.floor(Number(nuevaCantidad) || 1));
     const lineaActual = estadoApp.carrito[idx];
-    if (lineaActual.editadoManualmente) {
+    if (Quote.esManualConPacks(lineaActual)) {
+      // Artículo manual con precio de unidad y de pack: elige solo según la cantidad.
+      estadoApp.carrito[idx] = Quote.recalcularLineaManualConPacks(lineaActual, cantidad);
+    } else if (lineaActual.editadoManualmente) {
       // Si el precio fue fijado a mano, se mantiene ese precio unitario y solo se
       // recalcula el subtotal con la nueva cantidad (no vuelve a la lista de precios).
       estadoApp.carrito[idx] = Quote.recalcularImporteConPrecioActual(lineaActual, cantidad);
@@ -686,15 +690,61 @@
       const precio = $('#manual-precio').value;
       const selProv = $('#manual-proveedor');
       const proveedor = selProv.value === OPCION_OTRO_PROVEEDOR ? '' : selProv.value;
-      estadoApp.carrito.push(Quote.crearLineaManual(nombre, cantidad, precio, proveedor));
+      const extra = {
+        hoja: $('#manual-hoja').value,
+        costoUnitario: $('#manual-costo').value,
+        cantidadPack: $('#manual-cantidad-pack').value,
+        margenUnit: $('#manual-margen-unit').value,
+        margenPack: $('#manual-margen-pack').value,
+      };
+      const linea = Quote.crearLineaManual(nombre, cantidad, precio, proveedor, extra);
+      if (!(linea.precioUnitarioAplicado > 0) &&
+          !window.confirm('Este artículo quedó con precio $ 0 (no cargaste precio de venta ni costo y % de ganancia). ¿Agregarlo igual?')) {
+        return;
+      }
+      estadoApp.carrito.push(linea);
+
+      // Pendiente de incorporar al Excel / catálogo (si no está ya en la lista).
+      let avisoExtra = '';
+      if ($('#manual-incorporar').checked) {
+        const clave = Store.claveArticulo(nombre);
+        const yaEnLista = estadoApp.listaPrecios && estadoApp.listaPrecios.items.some(function (it) {
+          return Store.claveArticulo(it.articulo) === clave;
+        });
+        if (yaEnLista) {
+          avisoExtra = ' (ya figura en la lista de precios, no se agregó a Pendientes)';
+        } else {
+          Store.agregarPendiente({
+            articulo: nombre,
+            hoja: linea.hoja,
+            proveedor: unificarProveedor(proveedor),
+            cantidadPack: linea.cantidadPack,
+            costoUnitario: linea.costoManual,
+            margenUnit: linea.margenUnitManual,
+            margenPack: linea.margenPackManual,
+            precioUnitario: linea.precioUnitarioOriginal != null ? linea.precioUnitarioOriginal : linea.precioUnitarioAplicado,
+            precioPack: linea.precioPackOriginal != null ? linea.precioPackOriginal : null,
+          });
+          actualizarBadgePendientes();
+          renderPendientes();
+          avisoExtra = ' Quedó en Pendientes para incorporarlo al Excel.';
+        }
+      }
+
       $('#manual-nombre').value = '';
       llenarSelectorProveedor($('#manual-proveedor'), '');
       renderBotonesProveedorManual();
       $('#manual-cantidad').value = '';
       $('#manual-precio').value = '';
+      ['manual-hoja', 'manual-costo', 'manual-cantidad-pack', 'manual-margen-unit', 'manual-margen-pack'].forEach(function (id) {
+        $('#' + id).value = '';
+      });
+      $('#manual-incorporar').checked = true;
+      const detalles = $('.manual-mas');
+      if (detalles) detalles.open = false;
       form.style.display = 'none';
       renderCarrito();
-      mostrarAviso('Artículo agregado al presupuesto.');
+      mostrarAviso('Artículo agregado al presupuesto.' + avisoExtra);
     });
   }
 
@@ -742,6 +792,14 @@
             }, ['↺'])
           : document.createTextNode(''),
       ]);
+
+      // Alerta: precio por debajo del costo (costo del Excel, o el cargado a mano).
+      const costoRef = linea.esManual ? linea.costoManual : Store.obtenerCostoDeArticulo(Quote.nombreEnLista(linea));
+      if (costoRef > 0 && linea.precioUnitarioAplicado > 0 && linea.precioUnitarioAplicado < costoRef) {
+        celdaPrecio.appendChild(crearElemento('div', { class: 'alerta-margen' }, [
+          '⚠ Por debajo del costo (' + Quote.formatoMoneda(costoRef) + ')',
+        ]));
+      }
 
       const tr = crearElemento('tr', {}, [
         crearElemento('td', { class: 'col-producto' }, [
@@ -879,7 +937,14 @@
     }
 
     function agregarYSeleccionar(nombreTipeado) {
-      const nombreGuardado = Store.agregarCliente(nombreTipeado);
+      const decision = confirmarAltaCliente(nombreTipeado);
+      if (!decision) { resultados.classList.remove('visible'); return; } // canceló: no se crea nada
+      if (decision.usar) {
+        establecerCliente(decision.usar);
+        mostrarAviso('Se usó el cliente existente "' + decision.usar + '".');
+        return;
+      }
+      const nombreGuardado = Store.agregarCliente(decision.crear);
       if (!nombreGuardado) return;
       establecerCliente(nombreGuardado);
       mostrarAviso('Cliente "' + nombreGuardado + '" agregado.');
@@ -1525,7 +1590,7 @@
       config: Store.obtenerConfig(),
       historial: Store.obtenerHistorial(true), // incluye papelera, para que un backup sea realmente completo
       listaPrecios: Store.obtenerListaPrecios(),
-      clientes: { nombres: Store.obtenerClientes(), contactos: Store.obtenerContactosClientes() },
+      clientes: { nombres: Store.obtenerClientes(), contactos: Store.obtenerContactosClientes(), datos: Store.obtenerDatosClientes() },
       proveedores: Store.obtenerMapaProveedores(),
       costosHistoricos: Store.obtenerHistorialCostos(),
     };
@@ -1728,6 +1793,8 @@
 
   function renderListaPreciosInfo() {
     renderAvisoLista();
+    actualizarBadgePendientes();
+    renderPendientes();
     const lista = estadoApp.listaPrecios;
     $('#lp-origen').textContent = (lista && lista.origenArchivo) || '—';
     $('#lp-fecha').textContent = (lista && lista.actualizado) ? Quote.formatoFecha(lista.actualizado) : '—';
@@ -1777,6 +1844,9 @@
                 resultado.sinProveedor.slice(0, 8).join(', ') + (resultado.sinProveedor.length > 8 ? '…' : '') +
                 '. Van a aparecer como "Sin proveedor asignado" en la lista de compras hasta que unifiques el nombre en el Excel.'
               : '');
+          renderInformeCarga(resultado.informe, resultado);
+          actualizarBadgePendientes();
+          renderPendientes();
           mostrarAviso('Lista de precios actualizada correctamente.');
         })
         .catch(function (err) {
@@ -1812,6 +1882,396 @@
   }
 
   // ---------------------------------------------------------------------
+  // Clientes: alta, edición y baja desde la app
+  // ---------------------------------------------------------------------
+  /**
+   * Antes de crear un cliente nuevo: avisa si ya hay uno parecido (error de
+   * tipeo) y pide confirmar cómo quedó escrito. Devuelve null (cancelado),
+   * { usar: nombreExistente } o { crear: nombreNormalizado }.
+   */
+  function confirmarAltaCliente(nombreTipeado) {
+    const norm = normalizarNombreCliente(nombreTipeado);
+    if (!norm) return null;
+    const parecido = Quote.buscarProveedorParecido(norm, Store.obtenerClientes());
+    if (parecido && parecido.nombre !== norm) {
+      const esElMismo = window.confirm(
+        'Ya existe un cliente parecido:\n\n"' + parecido.nombre + '"\n\n¿Es el mismo cliente?\n\n' +
+        'Aceptar = usar ese cliente.\nCancelar = seguir para crear "' + norm + '" como cliente nuevo.'
+      );
+      if (esElMismo) return { usar: parecido.nombre };
+    }
+    if (!window.confirm('Vas a agregar un cliente nuevo:\n\n"' + norm + '"\n\n¿Está bien escrito?')) return null;
+    return { crear: norm };
+  }
+
+  const estadoClientes = { filtro: '', editando: null };
+
+  function renderClientes() {
+    const tbody = $('#tabla-clientes tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const todos = Store.obtenerClientes();
+    const q = Pricelist.normalizar(estadoClientes.filtro);
+    const filas = todos.filter(function (nombre) {
+      if (!q) return true;
+      const f = Store.obtenerDatosCliente(nombre);
+      return Pricelist.normalizar(nombre + ' ' + f.cuit + ' ' + f.contacto).indexOf(q) !== -1;
+    });
+    $('#clientes-contador').textContent = q
+      ? filas.length + ' de ' + todos.length + ' clientes'
+      : todos.length + ' clientes';
+
+    if (filas.length === 0) {
+      tbody.appendChild(crearElemento('tr', {}, [
+        crearElemento('td', { colspan: '5', class: 'vacio' }, [todos.length === 0 ? 'Todavía no hay clientes.' : 'Sin coincidencias.']),
+      ]));
+      return;
+    }
+    filas.forEach(function (nombre) {
+      const ficha = Store.obtenerDatosCliente(nombre);
+      const cant = Store.contarPresupuestosDeCliente(nombre);
+      tbody.appendChild(crearElemento('tr', {}, [
+        crearElemento('td', {}, [nombre]),
+        crearElemento('td', {}, [ficha.cuit || '—']),
+        crearElemento('td', {}, [ficha.contacto || '—']),
+        crearElemento('td', {}, [String(cant.activos)]),
+        crearElemento('td', {}, [
+          crearElemento('div', { class: 'acciones-fila' }, [
+            crearElemento('button', { type: 'button', class: 'btn-mini', onclick: function () { abrirModalCliente(nombre); } }, ['Editar']),
+            crearElemento('button', { type: 'button', class: 'btn-mini-peligro', onclick: function () { eliminarClienteConfirmado(nombre); } }, ['Eliminar']),
+          ]),
+        ]),
+      ]));
+    });
+  }
+
+  function abrirModalCliente(nombreOriginal) {
+    estadoClientes.editando = nombreOriginal || null;
+    const ficha = nombreOriginal ? Store.obtenerDatosCliente(nombreOriginal) : { contacto: '', cuit: '', notas: '' };
+    $('#cli-titulo').textContent = nombreOriginal ? 'Editar cliente' : 'Nuevo cliente';
+    $('#cli-nombre').value = nombreOriginal || '';
+    $('#cli-cuit').value = ficha.cuit;
+    $('#cli-contacto').value = ficha.contacto;
+    $('#cli-notas').value = ficha.notas;
+    $('#cli-error').textContent = '';
+    $('#modal-cliente').style.display = 'flex';
+    $('#cli-nombre').focus();
+  }
+
+  function cerrarModalCliente() {
+    $('#modal-cliente').style.display = 'none';
+    estadoClientes.editando = null;
+  }
+
+  function guardarClienteDesdeModal() {
+    const original = estadoClientes.editando;
+    const ficha = {
+      nombre: $('#cli-nombre').value,
+      cuit: $('#cli-cuit').value,
+      contacto: $('#cli-contacto').value,
+      notas: $('#cli-notas').value,
+    };
+    const nuevo = normalizarNombreCliente(ficha.nombre);
+    if (!nuevo) { $('#cli-error').textContent = 'Escribí el nombre del cliente.'; return; }
+
+    if (!original) {
+      // Cliente nuevo: se avisa si ya hay uno parecido y se pide confirmar.
+      const decision = confirmarAltaCliente(ficha.nombre);
+      if (!decision) return;
+      if (decision.usar) {
+        cerrarModalCliente();
+        mostrarAviso('Ya existía "' + decision.usar + '": no se creó uno nuevo.');
+        return;
+      }
+    } else if (nuevo !== normalizarNombreCliente(original)) {
+      const cant = Store.contarPresupuestosDeCliente(original);
+      const aviso = cant.activos + cant.enPapelera > 0
+        ? '\n\nSus ' + cant.activos + ' presupuesto(s) del historial NO cambian: siguen con el nombre anterior.'
+        : '';
+      if (!window.confirm('Vas a cambiar el nombre:\n\n"' + original + '"  →  "' + nuevo + '"' + aviso + '\n\n¿Confirmás?')) return;
+    }
+
+    const res = Store.guardarCliente(original, ficha);
+    if (!res.ok) { $('#cli-error').textContent = res.error; return; }
+    cerrarModalCliente();
+    renderClientes();
+    mostrarAviso(original ? 'Cliente actualizado.' : 'Cliente "' + res.nombre + '" agregado.');
+  }
+
+  function eliminarClienteConfirmado(nombre) {
+    const cant = Store.contarPresupuestosDeCliente(nombre);
+    const aviso = cant.activos > 0
+      ? '\n\nTiene ' + cant.activos + ' presupuesto(s) en el historial: NO se borran, siguen apareciendo con este nombre.'
+      : '';
+    if (!window.confirm('¿Eliminar al cliente "' + nombre + '" de la lista?' + aviso)) return;
+    const res = Store.eliminarCliente(nombre);
+    if (!res.ok) { mostrarAviso(res.error, true); return; }
+    renderClientes();
+    mostrarAviso('Cliente "' + nombre + '" eliminado de la lista.');
+  }
+
+  function initClientes() {
+    $('#btn-nuevo-cliente').addEventListener('click', function () { abrirModalCliente(null); });
+    $('#buscador-clientes').addEventListener('input', debounce(function (e) {
+      estadoClientes.filtro = e.target.value;
+      renderClientes();
+    }, 120));
+    $('#btn-cli-guardar').addEventListener('click', guardarClienteDesdeModal);
+    $('#btn-cli-cancelar').addEventListener('click', cerrarModalCliente);
+    $('#modal-cliente').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') guardarClienteDesdeModal();
+      if (e.key === 'Escape') cerrarModalCliente();
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Pendientes de incorporar al Excel (artículos cargados a mano)
+  // ---------------------------------------------------------------------
+  function actualizarBadgePendientes() {
+    const badge = $('#badge-pendientes');
+    if (!badge) return;
+    const n = Store.obtenerPendientes().length;
+    badge.textContent = String(n);
+    badge.style.display = n > 0 ? 'inline-block' : 'none';
+    badge.title = n + ' artículo(s) cargados a mano para incorporar al Excel';
+  }
+
+  function renderPendientes() {
+    const tbody = $('#tabla-pendientes tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const pendientes = Store.obtenerPendientes();
+    $('#btn-pendientes-excel').disabled = pendientes.length === 0;
+    if (pendientes.length === 0) {
+      tbody.appendChild(crearElemento('tr', {}, [
+        crearElemento('td', { colspan: '9', class: 'vacio' }, ['No hay artículos pendientes.']),
+      ]));
+      return;
+    }
+    const num = function (v) { return v === null || v === undefined || v === '' ? '—' : String(v); };
+    const dinero = function (v) { return v > 0 ? Quote.formatoMoneda(v) : '—'; };
+    pendientes.forEach(function (p) {
+      tbody.appendChild(crearElemento('tr', {}, [
+        crearElemento('td', {}, [p.articulo]),
+        crearElemento('td', {}, [num(p.hoja)]),
+        crearElemento('td', {}, [p.proveedor || '—']),
+        crearElemento('td', {}, [num(p.cantidadPack)]),
+        crearElemento('td', {}, [dinero(p.costoUnitario)]),
+        crearElemento('td', {}, [p.margenUnit ? p.margenUnit + '%' : '—']),
+        crearElemento('td', {}, [p.margenPack ? p.margenPack + '%' : '—']),
+        crearElemento('td', {}, [dinero(p.precioUnitario)]),
+        crearElemento('td', {}, [
+          crearElemento('button', {
+            type: 'button', class: 'btn-mini-peligro',
+            onclick: function () {
+              if (!window.confirm('¿Quitar "' + p.articulo + '" de Pendientes? (no afecta a ningún presupuesto)')) return;
+              Store.eliminarPendiente(p.id);
+              actualizarBadgePendientes();
+              renderPendientes();
+            },
+          }, ['Quitar']),
+        ]),
+      ]));
+    });
+  }
+
+  /** Planilla con las mismas columnas de la hoja Maestra, lista para pegar en el Excel. */
+  function descargarPendientesExcel() {
+    const pendientes = Store.obtenerPendientes();
+    if (pendientes.length === 0) { mostrarAviso('No hay pendientes para descargar.', true); return; }
+    const filas = pendientes.map(function (p) {
+      return {
+        'HOJA': p.hoja || '',
+        'ARTÍCULO': p.articulo,
+        'PROVEEDOR': p.proveedor || '',
+        'CANT. PACK': p.cantidadPack || '',
+        'COSTO UNIT.': p.costoUnitario || '',
+        '% MARGEN UNIT.': p.margenUnit ? p.margenUnit / 100 : '',
+        '% MARGEN PACK': p.margenPack ? p.margenPack / 100 : '',
+        'PRECIO UNIT. (referencia)': p.precioUnitario || '',
+        'PRECIO PACK x UNIDAD (referencia)': p.precioPack || '',
+        'FECHA DE CARGA': String(p.fecha || '').slice(0, 10),
+      };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), 'Pendientes');
+    XLSX.writeFile(wb, 'Pendientes_para_Excel_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    mostrarAviso('Planilla descargada. Pegala en la hoja Maestra del Excel y subí el Excel actualizado.');
+  }
+
+  function initPendientes() {
+    $('#btn-pendientes-excel').addEventListener('click', descargarPendientesExcel);
+    actualizarBadgePendientes();
+    renderPendientes();
+  }
+
+  // ---------------------------------------------------------------------
+  // PDF de la lista de precios para clientes
+  // ---------------------------------------------------------------------
+  function generarPDFListaPrecios(descargar) {
+    const lista = estadoApp.listaPrecios;
+    if (!lista || !lista.items || lista.items.length === 0) {
+      mostrarAviso('No hay lista de precios cargada.', true);
+      return;
+    }
+    if (!lista.items.some(function (it) { return it.hoja !== null && it.hoja !== undefined; })) {
+      mostrarAviso('Esta lista se cargó antes de guardar las hojas: el PDF sale de la A a la Z. Volvé a subir el Excel para ordenarlo por hoja.', true);
+    }
+    const doc = PdfGen.construirPDFListaPrecios(lista, Store.obtenerConfig());
+    if (descargar) doc.save(PdfGen.nombreArchivoListaPrecios(lista));
+    else window.open(doc.output('bloburl'), '_blank');
+  }
+
+  function initListaPreciosPdf() {
+    $('#btn-lp-pdf-preview').addEventListener('click', function () { generarPDFListaPrecios(false); });
+    $('#btn-lp-pdf-descargar').addEventListener('click', function () { generarPDFListaPrecios(true); });
+  }
+
+  // ---------------------------------------------------------------------
+  // Informe de cambios al subir una lista nueva
+  // ---------------------------------------------------------------------
+  function pctTexto(p) {
+    if (p === null || p === undefined) return '';
+    const v = Math.round(p * 1000) / 10;
+    return (v > 0 ? '+' : '') + v + '%';
+  }
+
+  function tablaSimple(encabezados, filas, limite) {
+    const tabla = crearElemento('table', {}, []);
+    tabla.appendChild(crearElemento('thead', {}, [crearElemento('tr', {}, encabezados.map(function (h) { return crearElemento('th', {}, [h]); }))]));
+    const tb = crearElemento('tbody', {}, []);
+    filas.slice(0, limite).forEach(function (celdas) {
+      tb.appendChild(crearElemento('tr', {}, celdas.map(function (c) {
+        return (typeof c === 'object' && c !== null && c.nodeType) ? crearElemento('td', {}, [c]) : crearElemento('td', {}, [String(c === null || c === undefined ? '—' : c)]);
+      })));
+    });
+    tabla.appendChild(tb);
+    const wrap = crearElemento('div', { class: 'tabla-wrap' }, [tabla]);
+    if (filas.length > limite) {
+      wrap.appendChild(crearElemento('p', { class: 'texto-ayuda' }, ['… y ' + (filas.length - limite) + ' más. El informe completo se descarga en Excel.']));
+    }
+    return wrap;
+  }
+
+  function bloqueDetalle(titulo, cantidad, contenido, abierto) {
+    if (!cantidad) return document.createTextNode('');
+    const d = crearElemento('details', { class: 'informe-bloque' }, [crearElemento('summary', {}, [titulo + ' (' + cantidad + ')']), contenido]);
+    if (abierto) d.open = true;
+    return d;
+  }
+
+  function renderInformeCarga(informe, resultado) {
+    const card = $('#lp-informe-card');
+    const cont = $('#lp-informe');
+    if (!card || !cont || !informe) return;
+    estadoApp.ultimoInforme = informe;
+    cont.innerHTML = '';
+    card.style.display = 'block';
+    const r = informe.resumen;
+    const a = informe.alertas;
+    const dato = function (valor, etiqueta, esAlerta) {
+      return crearElemento('div', { class: 'informe-dato' + (esAlerta && valor > 0 ? ' alerta' : '') }, [crearElemento('strong', {}, [String(valor)]), etiqueta]);
+    };
+
+    if (informe.hayListaAnterior) {
+      cont.appendChild(crearElemento('div', { class: 'informe-resumen' }, [
+        dato(r.total, 'artículos en la lista nueva'),
+        dato(r.iguales, 'sin cambios'),
+        dato(r.subieron, 'subieron de precio'),
+        dato(r.bajaron, 'bajaron de precio'),
+        dato(r.nuevos, 'nuevos'),
+        dato(r.retirados, 'ya no están'),
+      ]));
+    } else {
+      cont.appendChild(crearElemento('p', { class: 'texto-ayuda' }, ['Es la primera carga: no hay una lista anterior para comparar. Abajo van las alertas de la lista nueva.']));
+    }
+
+    cont.appendChild(crearElemento('div', { class: 'informe-resumen' }, [
+      dato(a.margenBajo.length, 'con margen por debajo del objetivo', true),
+      dato(a.sinCosto.length, 'sin costo cargado', true),
+      dato(a.packMasCaro.length, 'con pack más caro que la unidad', true),
+      dato(a.precioCero.length, 'con precio en cero', true),
+    ]));
+
+    if (resultado && resultado.pendientesIncorporados && resultado.pendientesIncorporados.length > 0) {
+      cont.appendChild(crearElemento('p', { class: 'texto-ayuda' }, [
+        '✔ Salieron de Pendientes porque ya están en la lista: ' + resultado.pendientesIncorporados.join(', ') + '.',
+      ]));
+    }
+
+    cont.appendChild(bloqueDetalle('Alertas de margen', a.margenBajo.length, tablaSimple(
+      ['Artículo', 'Costo', 'Margen unit. real / objetivo', 'Margen pack real / objetivo'],
+      a.margenBajo.map(function (m) {
+        const pct = function (v) { return v === null || v === undefined ? '—' : (Math.round(v * 1000) / 10) + '%'; };
+        return [m.articulo + (m.bajoCosto ? ' ⚠ POR DEBAJO DEL COSTO' : ''), Quote.formatoMoneda(m.costo), pct(m.realUnit) + ' / ' + pct(m.esperadoUnit), pct(m.realPack) + ' / ' + pct(m.esperadoPack)];
+      }), 30), true));
+    cont.appendChild(bloqueDetalle('Artículos sin costo', a.sinCosto.length, tablaSimple(['Artículo'], a.sinCosto.map(function (x) { return [x]; }), 40), false));
+    cont.appendChild(bloqueDetalle('Pack más caro que la unidad', a.packMasCaro.length, tablaSimple(
+      ['Artículo', 'Precio unidad', 'Precio pack'],
+      a.packMasCaro.map(function (x) { return [x.articulo, Quote.formatoMoneda(x.unit), Quote.formatoMoneda(x.pack)]; }), 30), true));
+    cont.appendChild(bloqueDetalle('Precio en cero', a.precioCero.length, tablaSimple(['Artículo'], a.precioCero.map(function (x) { return [x]; }), 30), true));
+
+    if (informe.hayListaAnterior) {
+      cont.appendChild(bloqueDetalle('Precios que cambiaron (los de mayor variación primero)', informe.cambios.length, tablaSimple(
+        ['Artículo', 'Hoja', 'Unidad: antes → ahora', 'Pack x unidad: antes → ahora', 'Cant. pack'],
+        informe.cambios.map(function (c) {
+          const clase = (c.pctUnit || 0) > 0 ? 'suba' : 'baja';
+          return [
+            c.articulo, c.hoja === null ? '—' : c.hoja,
+            crearElemento('span', { class: clase }, [Quote.formatoMoneda(c.unitAntes) + ' → ' + Quote.formatoMoneda(c.unitAhora) + ' (' + pctTexto(c.pctUnit) + ')']),
+            Quote.formatoMoneda(c.packAntes) + ' → ' + Quote.formatoMoneda(c.packAhora) + ' (' + pctTexto(c.pctPack) + ')',
+            c.cantAntes === c.cantAhora ? c.cantAhora : (c.cantAntes + ' → ' + c.cantAhora),
+          ];
+        }), 30), false));
+      cont.appendChild(bloqueDetalle('Artículos nuevos', informe.nuevos.length, tablaSimple(
+        ['Artículo', 'Hoja', 'Precio unidad', 'Precio pack x unidad'],
+        informe.nuevos.map(function (x) { return [x.articulo, x.hoja === null || x.hoja === undefined ? '—' : x.hoja, Quote.formatoMoneda(x.precioUnitario), Quote.formatoMoneda(x.precioPack)]; }), 30), false));
+      cont.appendChild(bloqueDetalle('Artículos que ya no están en la lista', informe.retirados.length, tablaSimple(
+        ['Artículo', 'Precio unidad que tenía'],
+        informe.retirados.map(function (x) { return [x.articulo, Quote.formatoMoneda(x.precioUnitario)]; }), 30), false));
+    }
+
+    cont.appendChild(crearElemento('div', { class: 'acciones-presupuesto', style: 'justify-content:flex-start;' }, [
+      crearElemento('button', { type: 'button', class: 'btn btn-secundario', onclick: descargarInformeCarga }, ['Descargar informe completo (Excel)']),
+    ]));
+  }
+
+  function descargarInformeCarga() {
+    const inf = estadoApp.ultimoInforme;
+    if (!inf) return;
+    const wb = XLSX.utils.book_new();
+    const r = inf.resumen;
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Informe de carga de lista de precios', new Date().toLocaleString('es-AR')],
+      ['Artículos en la lista nueva', r.total], ['Sin cambios', r.iguales], ['Cambiaron', r.cambiaron],
+      ['Subieron', r.subieron], ['Bajaron', r.bajaron], ['Nuevos', r.nuevos], ['Retirados', r.retirados],
+      ['Con margen bajo el objetivo', inf.alertas.margenBajo.length], ['Sin costo', inf.alertas.sinCosto.length],
+      ['Pack más caro que la unidad', inf.alertas.packMasCaro.length], ['Precio en cero', inf.alertas.precioCero.length],
+    ]), 'Resumen');
+    const pc = function (v) { return v === null || v === undefined ? '' : v; };
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inf.cambios.map(function (c) {
+      return { 'HOJA': pc(c.hoja), 'ARTÍCULO': c.articulo, 'UNIDAD ANTES': c.unitAntes, 'UNIDAD AHORA': c.unitAhora, 'VAR. UNIDAD': pc(c.pctUnit),
+        'PACK x U. ANTES': c.packAntes, 'PACK x U. AHORA': c.packAhora, 'VAR. PACK': pc(c.pctPack), 'CANT. PACK ANTES': c.cantAntes, 'CANT. PACK AHORA': c.cantAhora };
+    })), 'Cambios de precio');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inf.nuevos.map(function (x) {
+      return { 'HOJA': pc(x.hoja), 'ARTÍCULO': x.articulo, 'PRECIO UNIDAD': x.precioUnitario, 'PRECIO PACK x U.': x.precioPack, 'CANT. PACK': x.cantidadPack };
+    })), 'Nuevos');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inf.retirados.map(function (x) {
+      return { 'HOJA': pc(x.hoja), 'ARTÍCULO': x.articulo, 'PRECIO UNIDAD': x.precioUnitario, 'PRECIO PACK x U.': x.precioPack };
+    })), 'Retirados');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inf.alertas.margenBajo.map(function (m) {
+      return { 'ARTÍCULO': m.articulo, 'COSTO': m.costo, 'MARGEN UNIT. REAL': m.realUnit, 'MARGEN UNIT. OBJETIVO': pc(m.esperadoUnit),
+        'MARGEN PACK REAL': m.realPack, 'MARGEN PACK OBJETIVO': pc(m.esperadoPack), 'POR DEBAJO DEL COSTO': m.bajoCosto ? 'SÍ' : '' };
+    })), 'Alertas de margen');
+    const otras = [];
+    inf.alertas.sinCosto.forEach(function (a) { otras.push({ 'ALERTA': 'Sin costo', 'ARTÍCULO': a }); });
+    inf.alertas.packMasCaro.forEach(function (a) { otras.push({ 'ALERTA': 'Pack más caro que la unidad', 'ARTÍCULO': a.articulo }); });
+    inf.alertas.precioCero.forEach(function (a) { otras.push({ 'ALERTA': 'Precio en cero', 'ARTÍCULO': a }); });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(otras), 'Otras alertas');
+    XLSX.writeFile(wb, 'Informe_carga_lista_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+  }
+
+  // ---------------------------------------------------------------------
   // Mayúsculas automáticas: todo el texto que termina en el presupuesto
   // (cliente, producto manual, condiciones, observaciones, datos de la
   // empresa) se escribe siempre en mayúsculas, como el resto de la lista
@@ -1821,6 +2281,10 @@
   const CAMPOS_MAYUSCULAS = [
     'input-cliente-nombre',
     'input-cliente-contacto',
+    'cli-nombre',
+    'cli-cuit',
+    'cli-contacto',
+    'cli-notas',
     'manual-nombre',
     'input-condiciones',
     'input-observaciones',
@@ -1907,6 +2371,9 @@
         initSeleccionRapida();
         initFormularioManual();
         initSelectorCliente();
+        initClientes();
+        initPendientes();
+        initListaPreciosPdf();
         initFormularioPresupuesto();
         initConfiguracion();
         initActualizarLista();

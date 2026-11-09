@@ -159,6 +159,17 @@
   }
 
   const SIN_PROVEEDOR = 'Sin proveedor asignado';
+
+  // Estos proveedores van SIEMPRE en hojas separadas, sin mezclar nada de otro
+  // proveedor en la misma hoja (el resto sí puede compartir hoja).
+  const PROVEEDORES_EN_HOJA_PROPIA = ['garra', 'mundobazar'];
+  function claveProveedorPdf(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  }
+  function esProveedorExclusivo(nombre) {
+    return PROVEEDORES_EN_HOJA_PROPIA.indexOf(claveProveedorPdf(nombre)) !== -1;
+  }
   // Artículos cargados a mano sin proveedor elegido: no es un error, simplemente no se sabe a quién.
   const OTROS_PROVEEDORES = 'Otros proveedores';
 
@@ -217,7 +228,10 @@
       }
       const delMapa = mapaProveedores[normalizar(nombreLista)];
       const proveedor = proveedorManual || (esNombreValido(delMapa) ? delMapa : '') || (l.esManual ? OTROS_PROVEEDORES : SIN_PROVEEDOR);
-      let costoUnitario = (obtenerCosto && !l.esManual) ? obtenerCosto(nombreLista) : null;
+      // Manuales: el costo es el que se cargó a mano (si se cargó). Los de la lista: el del historial de costos.
+      let costoUnitario = l.esManual
+        ? (l.costoManual > 0 ? l.costoManual : null)
+        : (obtenerCosto ? obtenerCosto(nombreLista) : null);
       if (!(costoUnitario > 0)) costoUnitario = null; // costo en cero = costo no cargado, nunca "$ 0,00"
       const costoTotal = costoUnitario === null ? null : costoUnitario * l.cantidad;
       if (costoTotal === null) totalGeneralCompleto = false;
@@ -233,16 +247,32 @@
     // Al final: primero "Otros proveedores", y último el aviso de "Sin proveedor asignado"
     if (grupos[OTROS_PROVEEDORES]) nombresProveedores.push(OTROS_PROVEEDORES);
     if (grupos[SIN_PROVEEDOR]) nombresProveedores.push(SIN_PROVEEDOR);
+    // Garra y Mundo Bazar siempre van primero y cada uno en su(s) propia(s) hoja(s).
+    nombresProveedores.sort(function (a, b) { return (esProveedorExclusivo(b) ? 1 : 0) - (esProveedorExclusivo(a) ? 1 : 0); });
+
+    // En la página 1 el encabezado no cuenta como "contenido de un proveedor".
+    let hayProveedorEnPagina = false;
+    let siguienteEnPaginaNueva = false;
+    const resumen = [];
 
     nombresProveedores.forEach(function (proveedor) {
+      const exclusivo = esProveedorExclusivo(proveedor);
       const items = grupos[proveedor].slice().sort(function (a, b) {
         return a.articulo.localeCompare(b.articulo, 'es', { sensitivity: 'base' });
       });
       const subtotalProveedor = items.reduce(function (acc, l) { return acc + (l.costoTotal || 0); }, 0);
       const subtotalCompleto = items.every(function (l) { return l.costoTotal !== null; });
 
-      // Si no entra el título del proveedor + al menos una fila, saltar de página
-      if (y > 740) { doc.addPage(); y = 50; }
+      // Garra y Mundo Bazar empiezan hoja nueva; y el proveedor que viene
+      // después de uno de ellos también, así nunca se mezclan.
+      if ((exclusivo && hayProveedorEnPagina) || siguienteEnPaginaNueva) {
+        doc.addPage();
+        y = 50;
+      } else if (y > 740) {
+        // Si no entra el título del proveedor + al menos una fila, saltar de página
+        doc.addPage();
+        y = 50;
+      }
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
@@ -282,12 +312,33 @@
       );
       doc.setFont('helvetica', 'normal');
       y += 28;
+
+      hayProveedorEnPagina = true;
+      siguienteEnPaginaNueva = exclusivo;
+      resumen.push({ proveedor: proveedor, subtotal: subtotalProveedor, completo: subtotalCompleto });
     });
 
-    if (y > 740) { doc.addPage(); y = 50; }
+    // El total va en una hoja aparte si el último proveedor fue Garra o Mundo Bazar.
+    if (siguienteEnPaginaNueva || y > 700) { doc.addPage(); y = 50; }
     doc.setDrawColor(210);
     doc.line(margenIzq, y, 555, y);
     y += 20;
+    if (resumen.length > 1) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Resumen por proveedor', margenIzq, y);
+      y += 6;
+      doc.autoTable({
+        startY: y,
+        body: resumen.map(function (r) {
+          return [r.proveedor, formatoMoneda(r.subtotal) + (r.completo ? '' : ' (incompleto)')];
+        }),
+        margin: { left: margenIzq, right: 40 },
+        styles: { font: 'helvetica', fontSize: 9, cellPadding: 4, textColor: [0, 0, 0] },
+        columnStyles: { 1: { halign: 'right', cellWidth: 140 } },
+      });
+      y = doc.lastAutoTable.finalY + 22;
+    }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.text(
@@ -312,10 +363,165 @@
       .slice(0, 80) + '.pdf';
   }
 
+
+  // ---------------------------------------------------------------------
+  // Lista de precios para clientes: se arma sola con la lista vigente,
+  // ordenada por hoja del catálogo y por el orden del Excel, centrada.
+  // ---------------------------------------------------------------------
+  function construirPDFListaPrecios(lista, config) {
+    const jsPDF = window.jspdf.jsPDF;
+    const formatoMoneda = window.Quote.formatoMoneda;
+    const formatoFecha = window.Quote.formatoFecha;
+    const empresa = (config && config.empresa) || {};
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    const H = doc.internal.pageSize.getHeight();
+    const centro = W / 2;
+    const anchoTabla = 500;
+    const margenLateral = (W - anchoTabla) / 2;
+    const arriba = 50;
+    const abajo = H - 50;
+    let y = 40;
+
+    // ---------- Encabezado centrado ----------
+    if (empresa.logoBase64) {
+      try {
+        doc.addImage(empresa.logoBase64, 'PNG', centro - 32, y, 64, 64);
+        y += 74;
+      } catch (e) {
+        console.warn('No se pudo insertar el logo en el PDF:', e);
+      }
+    }
+    if (empresa.nombre) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(15);
+      doc.setTextColor(0);
+      doc.text(String(empresa.nombre), centro, y + 8, { align: 'center' });
+      y += 20;
+    }
+    const contacto = [empresa.telefono, empresa.email, empresa.direccion].filter(Boolean).join('   ·   ');
+    if (contacto) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(90);
+      doc.text(contacto, centro, y + 8, { align: 'center' });
+      y += 16;
+    }
+    y += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(20);
+    doc.setTextColor(15, 107, 92);
+    doc.text('LISTA DE PRECIOS', centro, y + 14, { align: 'center' });
+    y += 28;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(90);
+    doc.text('Vigente al ' + formatoFecha(lista.actualizado), centro, y + 8, { align: 'center' });
+    y += 20;
+    doc.setFontSize(8);
+    doc.text('El precio por pack se aplica a partir de la cantidad indicada en "Cant. pack".', centro, y + 6, { align: 'center' });
+    y += 18;
+    doc.setDrawColor(210);
+    doc.line(margenLateral, y, W - margenLateral, y);
+    y += 16;
+    doc.setTextColor(0);
+
+    // ---------- Agrupar por hoja y ordenar ----------
+    const items = (lista.items || []).map(function (it, i) { return Object.assign({ _i: i }, it); });
+    const hayHojas = items.some(function (it) { return it.hoja !== null && it.hoja !== undefined; });
+    let grupos;
+    if (hayHojas) {
+      const porHoja = {};
+      items.forEach(function (it) {
+        const k = (it.hoja === null || it.hoja === undefined) ? 'sin' : String(it.hoja);
+        if (!porHoja[k]) porHoja[k] = { hoja: k === 'sin' ? null : Number(k), items: [] };
+        porHoja[k].items.push(it);
+      });
+      grupos = Object.keys(porHoja).map(function (k) { return porHoja[k]; }).sort(function (a, b) {
+        if (a.hoja === null) return 1;
+        if (b.hoja === null) return -1;
+        return a.hoja - b.hoja;
+      });
+      grupos.forEach(function (g) {
+        g.items.sort(function (a, b) { return (a.orden || a._i) - (b.orden || b._i); });
+      });
+    } else {
+      // Lista cargada antes de guardar la hoja: queda de la A a la Z sin separadores.
+      grupos = [{
+        hoja: null,
+        items: items.sort(function (a, b) { return a.articulo.localeCompare(b.articulo, 'es', { sensitivity: 'base' }); }),
+      }];
+    }
+
+    const alturaFila = 18;
+    const alturaCabecera = 30;
+    const alturaBanda = 26;
+
+    grupos.forEach(function (g) {
+      const conBanda = hayHojas;
+      const alto = (conBanda ? alturaBanda : 0) + alturaCabecera + g.items.length * alturaFila;
+      // Una hoja que entra en una página no se corta; si es más larga, necesita lugar para al menos 4 filas.
+      const necesita = alto <= (abajo - arriba) ? alto : (conBanda ? alturaBanda : 0) + alturaCabecera + 4 * alturaFila;
+      if (necesita > abajo - y) { doc.addPage(); y = arriba; }
+
+      if (conBanda) {
+        doc.setFillColor(15, 107, 92);
+        doc.roundedRect(margenLateral, y, anchoTabla, 20, 3, 3, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(255);
+        doc.text(g.hoja === null ? 'OTROS ARTÍCULOS' : 'HOJA ' + g.hoja, centro, y + 14, { align: 'center' });
+        doc.setTextColor(0);
+        y += alturaBanda;
+      }
+
+      doc.autoTable({
+        startY: y,
+        head: [['ARTÍCULO', 'PRECIO UNIDAD', 'CANT. PACK', 'PRECIO POR UNIDAD EN PACK']],
+        body: g.items.map(function (it) {
+          return [it.articulo, formatoMoneda(it.precioUnitario), String(it.cantidadPack), formatoMoneda(it.precioPack)];
+        }),
+        margin: { left: margenLateral, right: margenLateral, top: arriba, bottom: 50 },
+        tableWidth: anchoTabla,
+        styles: { font: 'helvetica', fontSize: 9, cellPadding: 4, textColor: [0, 0, 0], valign: 'middle' },
+        headStyles: { fillColor: [230, 240, 237], textColor: [15, 107, 92], fontStyle: 'bold', halign: 'center', fontSize: 8 },
+        alternateRowStyles: { fillColor: [247, 249, 248] },
+        columnStyles: {
+          0: { cellWidth: 232, halign: 'left' },
+          1: { cellWidth: 82, halign: 'center' },
+          2: { cellWidth: 56, halign: 'center' },
+          3: { cellWidth: 130, halign: 'center' },
+        },
+      });
+      y = doc.lastAutoTable.finalY + 14;
+    });
+
+    // ---------- Pie de página en todas las hojas ----------
+    const total = doc.getNumberOfPages();
+    for (let i = 1; i <= total; i++) {
+      doc.setPage(i);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(140);
+      doc.text(
+        (empresa.nombre ? empresa.nombre + '  ·  ' : '') + 'Lista de precios  ·  Página ' + i + ' de ' + total,
+        centro, H - 28, { align: 'center' }
+      );
+    }
+    return doc;
+  }
+
+  function nombreArchivoListaPrecios(lista) {
+    const fecha = (lista && lista.actualizado ? String(lista.actualizado) : new Date().toISOString()).slice(0, 10);
+    return 'Lista_de_precios_' + fecha + '.pdf';
+  }
+
   window.PdfGen = {
     construirPDF: construirPDF,
     nombreArchivoPDF: nombreArchivoPDF,
     construirPDFCompras: construirPDFCompras,
     nombreArchivoListaCompras: nombreArchivoListaCompras,
+    construirPDFListaPrecios: construirPDFListaPrecios,
+    nombreArchivoListaPrecios: nombreArchivoListaPrecios,
   };
 })();

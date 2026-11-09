@@ -90,10 +90,57 @@
    * con esManual:true para que "Recalcular con lista vigente" la deje
    * intacta en vez de marcarla como "no encontrada".
    */
-  function crearLineaManual(nombre, cantidad, precioUnitario, proveedor) {
+  /**
+   * Regla de redondeo de precios de Limpieza Resuelta: centavos menores a
+   * ,50 bajan al peso entero; ,50 exacto se mantiene; mayores a ,50 suben
+   * al peso siguiente (1933,3 -> 1933 · 1933,5 -> 1933,5 · 1933,7 -> 1934).
+   */
+  function redondearPrecio(valor) {
+    const entero = Math.floor(valor);
+    const centavos = Math.round((valor - entero) * 100) / 100;
+    if (centavos < 0.5) return entero;
+    if (centavos === 0.5) return entero + 0.5;
+    return entero + 1;
+  }
+
+  /** Precio de venta a partir del costo y el % de ganancia sobre el precio: costo / (1 - margen). */
+  function precioSegunMargen(costo, margenPct) {
+    const c = Number(costo);
+    const m = Number(margenPct) / 100;
+    if (!(c > 0) || !(m > 0) || m >= 1) return 0;
+    return redondearPrecio(c / (1 - m));
+  }
+
+  /**
+   * `extra` (todo opcional): { hoja, costoUnitario, cantidadPack, margenUnit,
+   * margenPack } con los márgenes en %. Si no se indica precio pero sí costo y
+   * margen, el precio se calcula (con la regla de redondeo). Si además hay
+   * cantidad por pack y margen de pack, la línea queda con precio unitario y
+   * de pack, y se elige sola según la cantidad (igual que un artículo de la
+   * lista). Sigue marcada esManual para que "Recalcular" no la toque.
+   */
+  function crearLineaManual(nombre, cantidad, precioUnitario, proveedor, extra) {
+    extra = extra || {};
     const cantidadFinal = Math.max(1, Math.floor(Number(cantidad) || 1));
-    const precio = Math.max(0, Number(precioUnitario) || 0);
-    return {
+    let precio = Math.max(0, Number(precioUnitario) || 0);
+    const costo = Number(extra.costoUnitario) > 0 ? Number(extra.costoUnitario) : null;
+    const cantPack = Math.floor(Number(extra.cantidadPack)) > 0 ? Math.floor(Number(extra.cantidadPack)) : null;
+    const margenUnit = Number(extra.margenUnit) > 0 ? Number(extra.margenUnit) : null;
+    const margenPack = Number(extra.margenPack) > 0 ? Number(extra.margenPack) : null;
+    if (!(precio > 0) && costo && margenUnit) precio = precioSegunMargen(costo, margenUnit);
+    const precioPack = (costo && cantPack && margenPack) ? precioSegunMargen(costo, margenPack) : 0;
+    const datosExtra = {
+      hoja: Number(extra.hoja) > 0 ? Math.floor(Number(extra.hoja)) : null,
+      costoManual: costo,
+      margenUnitManual: margenUnit,
+      margenPackManual: margenPack,
+    };
+    // Con precio de pack y de unidad: se comporta como un artículo de lista.
+    if (precio > 0 && precioPack > 0 && precioPack <= precio) {
+      const base = crearLineaCarrito({ articulo: String(nombre).trim(), precioUnitario: precio, precioPack: precioPack, cantidadPack: cantPack }, cantidadFinal);
+      return Object.assign(base, datosExtra, { esManual: true, proveedor: String(proveedor || '').trim() });
+    }
+    return Object.assign({
       articulo: String(nombre).trim(),
       cantidad: cantidadFinal,
       cantidadPack: null,
@@ -105,7 +152,22 @@
       esManual: true,
       editadoManualmente: true,
       proveedor: String(proveedor || '').trim(),
-    };
+    }, datosExtra);
+  }
+
+  /** Recalcula una línea manual "de dos precios" (unidad y pack) para una nueva cantidad. */
+  function recalcularLineaManualConPacks(linea, nuevaCantidad) {
+    const nueva = crearLineaCarrito({
+      articulo: linea.articulo, precioUnitario: linea.precioUnitarioOriginal,
+      precioPack: linea.precioPackOriginal, cantidadPack: linea.cantidadPack,
+    }, nuevaCantidad);
+    return Object.assign({}, linea, nueva);
+  }
+
+  /** ¿Es una línea manual con precio de unidad y de pack (se recalcula con la cantidad)? */
+  function esManualConPacks(linea) {
+    return !!linea.esManual && !linea.editadoManualmente && linea.cantidadPack > 0 &&
+      linea.precioUnitarioOriginal > 0 && linea.precioPackOriginal > 0;
   }
 
   /** Fija un precio unitario manual para este presupuesto puntual, sin tocar la lista de precios. */
@@ -203,6 +265,10 @@
     calcularPrecioAplicado: calcularPrecioAplicado,
     crearLineaCarrito: crearLineaCarrito,
     crearLineaManual: crearLineaManual,
+    recalcularLineaManualConPacks: recalcularLineaManualConPacks,
+    esManualConPacks: esManualConPacks,
+    redondearPrecio: redondearPrecio,
+    precioSegunMargen: precioSegunMargen,
     recalcularLinea: recalcularLinea,
     nombreEnLista: nombreEnLista,
     buscarProveedorParecido: buscarProveedorParecido,

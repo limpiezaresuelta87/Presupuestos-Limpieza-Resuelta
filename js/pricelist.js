@@ -10,9 +10,11 @@
 (function () {
   const ALIAS_COLUMNAS = {
     articulo: ['PRODUCTO', 'PRODUCTOS', 'ARTICULO', 'ARTÍCULO'],
-    precioUnitario: ['$ UNIDAD', '$ X UNIDAD', '$ X UNI.', 'PRECIO UNITARIO', 'PRECIO UNIDAD'],
-    precioPack: ['$ PACK', '$ X PACK', 'PRECIO PACK', 'PRECIO POR UNIDAD PACK'],
-    cantidadPack: ['PACK', 'CANTIDAD PACK', 'CANTIDAD POR PACK'],
+    precioUnitario: ['$ UNIDAD', '$ X UNIDAD', '$ X UNI.', 'PRECIO UNITARIO', 'PRECIO UNIDAD', 'PRECIO_UNIDAD'],
+    precioPack: ['$ PACK', '$ X PACK', 'PRECIO PACK', 'PRECIO POR UNIDAD PACK', 'PRECIO_PACK'],
+    cantidadPack: ['PACK', 'CANTIDAD PACK', 'CANTIDAD POR PACK', 'CANT_PACK'],
+    // Opcional: página/hoja del catálogo a la que pertenece el artículo.
+    hoja: ['HOJA'],
   };
 
   // Palabras que identifican la hoja de precios "al público" / venta, para
@@ -84,6 +86,16 @@
 
         const items = [];
         let filasIgnoradas = 0;
+        // Hoja del catálogo: puede venir en una columna HOJA (formato Lista
+        // Maestra) o en filas separadoras "HOJA 7" (formato anterior).
+        let hojaActual = null;
+        let orden = 0;
+        // En el formato anterior el cartel "HOJA 1" está ARRIBA del encabezado.
+        for (let k = 0; k < f; k++) {
+          const celda0 = normalizar(filas[k] && filas[k][mapa.articulo !== undefined ? mapa.articulo : 0]);
+          const m0 = celda0.match(/^HOJA\s*(\d+)/);
+          if (m0) hojaActual = parseInt(m0[1], 10);
+        }
         for (let r = f + 1; r < filas.length; r++) {
           const fila = filas[r];
           if (!fila) continue;
@@ -91,6 +103,8 @@
           if (nombre === null || nombre === undefined || String(nombre).trim() === '') continue;
           const nombreNorm = normalizar(nombre);
           if (nombreNorm.indexOf('HOJA') === 0 || nombreNorm === 'PRODUCTO' || nombreNorm === 'PRODUCTOS') {
+            const mh = nombreNorm.match(/^HOJA\s*(\d+)/);
+            if (mh) hojaActual = parseInt(mh[1], 10);
             continue;
           }
           const pu = aNumero(fila[mapa.precioUnitario]);
@@ -100,11 +114,15 @@
             filasIgnoradas++;
             continue;
           }
+          const hojaDeFila = 'hoja' in mapa ? aNumero(fila[mapa.hoja]) : null;
+          orden++;
           items.push({
             articulo: String(nombre).trim().replace(/\s+/g, ' '),
             precioUnitario: Math.round(pu * 100) / 100,
             precioPack: Math.round(pp * 100) / 100,
             cantidadPack: Math.round(cp),
+            hoja: hojaDeFila !== null ? Math.round(hojaDeFila) : hojaActual,
+            orden: orden,
           });
         }
 
@@ -117,6 +135,65 @@
       'No se encontró una hoja con las columnas esperadas (Producto, $ Unidad, $ Pack, Pack). ' +
       'Verificá que el Excel tenga una hoja con esos encabezados.'
     );
+  }
+
+
+  /**
+   * Formato "Lista Maestra" (desde noviembre 2026): una única hoja "Maestra"
+   * con una fila por artículo que trae PROVEEDOR, costos, márgenes y precios.
+   * De ahí salen (a) el costo de cada artículo para Informes y (b) el
+   * proveedor de cada artículo para la lista de compras. Las demás pestañas
+   * (hojas de pedido por proveedor, Costos Garra, Auditoría, Retirados...)
+   * son de trabajo y NO se interpretan como proveedores.
+   * Devuelve null si el Excel no tiene ese formato (se usa el método viejo).
+   */
+  function parsearMaestra(workbook) {
+    const nombreHoja = workbook.SheetNames.find(function (n) { return normalizar(n) === 'MAESTRA'; });
+    if (!nombreHoja) return null;
+    const filas = XLSX.utils.sheet_to_json(workbook.Sheets[nombreHoja], { header: 1, defval: null, raw: true });
+
+    const COLS = {
+      articulo: 'ARTICULO', proveedor: 'PROVEEDOR', costoUnit: 'COSTO UNIT.', costoPack: 'COSTO PACK (TOTAL)',
+      margenUnit: '% MARGEN UNIT.', margenPack: '% MARGEN PACK', precioUnit: 'PRECIO UNIT.',
+      precioPackTotal: 'PRECIO PACK TOTAL',
+    };
+    for (let f = 0; f < Math.min(filas.length, 10); f++) {
+      const mapa = {};
+      filas[f].forEach(function (celda, i) {
+        const val = normalizar(celda);
+        Object.keys(COLS).forEach(function (k) { if (!(k in mapa) && val === COLS[k]) mapa[k] = i; });
+      });
+      if (!('articulo' in mapa && 'proveedor' in mapa && 'costoUnit' in mapa && 'precioUnit' in mapa)) continue;
+
+      const items = [];
+      for (let r = f + 1; r < filas.length; r++) {
+        const fila = filas[r];
+        if (!fila) continue;
+        const nombre = fila[mapa.articulo];
+        if (nombre === null || nombre === undefined || String(nombre).trim() === '') continue;
+        const costo = aNumero(fila[mapa.costoUnit]);
+        const precioU = aNumero(fila[mapa.precioUnit]);
+        const costoPack = 'costoPack' in mapa ? aNumero(fila[mapa.costoPack]) : null;
+        const precioPackTotal = 'precioPackTotal' in mapa ? aNumero(fila[mapa.precioPackTotal]) : null;
+        const mU = 'margenUnit' in mapa ? aNumero(fila[mapa.margenUnit]) : null;
+        const mP = 'margenPack' in mapa ? aNumero(fila[mapa.margenPack]) : null;
+        const prov = fila[mapa.proveedor];
+        items.push({
+          articulo: String(nombre).trim().replace(/\s+/g, ' '),
+          proveedor: prov === null || prov === undefined ? null : String(prov).trim(),
+          costoUnitario: costo !== null && costo > 0 ? Math.round(costo * 100) / 100 : null,
+          gananciaUnitario: costo > 0 && precioU !== null ? redondear(precioU - costo) : null,
+          pctGananciaEsperadoUnitario: mU,
+          precioSegunPctUnitario: costo > 0 && mU !== null && mU < 1 ? redondear(costo / (1 - mU)) : null,
+          costoPack: costoPack !== null && costoPack > 0 ? redondear(costoPack) : null,
+          gananciaPack: costoPack > 0 && precioPackTotal !== null ? redondear(precioPackTotal - costoPack) : null,
+          pctGananciaEsperadoPack: mP,
+          precioSegunPctPack: costoPack > 0 && mP !== null && mP < 1 ? redondear(costoPack / (1 - mP)) : null,
+        });
+      }
+      if (items.length > 0) return { items: items, hojaUsada: nombreHoja };
+    }
+    return null;
   }
 
   /**
@@ -334,6 +411,77 @@
     return mapa;
   }
 
+
+  /**
+   * Compara la lista nueva contra la que estaba vigente y arma un informe:
+   * precios que cambiaron, artículos nuevos y retirados, y alertas (sin
+   * costo, precio por debajo del objetivo de ganancia, pack más caro que
+   * la unidad, precios en cero). `itemsConCosto` es el snapshot de costos
+   * recién armado (trae costo y % de ganancia esperado de cada artículo).
+   */
+  function armarInforme(listaAnterior, itemsNuevos, itemsConCosto) {
+    const idxAnt = {};
+    ((listaAnterior && listaAnterior.items) || []).forEach(function (it) { idxAnt[normalizar(it.articulo)] = it; });
+    const idxNue = {};
+    itemsNuevos.forEach(function (it) { idxNue[normalizar(it.articulo)] = it; });
+
+    const nuevos = [];
+    const cambios = [];
+    let iguales = 0;
+    itemsNuevos.forEach(function (it) {
+      const ant = idxAnt[normalizar(it.articulo)];
+      if (!ant) { nuevos.push(it); return; }
+      const dU = ant.precioUnitario > 0 ? (it.precioUnitario - ant.precioUnitario) / ant.precioUnitario : null;
+      const dP = ant.precioPack > 0 ? (it.precioPack - ant.precioPack) / ant.precioPack : null;
+      const cambioPrecio = Math.abs(it.precioUnitario - ant.precioUnitario) > 0.005 || Math.abs(it.precioPack - ant.precioPack) > 0.005;
+      const cambioPack = it.cantidadPack !== ant.cantidadPack;
+      if (!cambioPrecio && !cambioPack) { iguales++; return; }
+      cambios.push({
+        articulo: it.articulo, hoja: it.hoja === undefined ? null : it.hoja,
+        unitAntes: ant.precioUnitario, unitAhora: it.precioUnitario, pctUnit: dU,
+        packAntes: ant.precioPack, packAhora: it.precioPack, pctPack: dP,
+        cantAntes: ant.cantidadPack, cantAhora: it.cantidadPack,
+      });
+    });
+    cambios.sort(function (a, b) { return Math.abs(b.pctUnit || 0) - Math.abs(a.pctUnit || 0); });
+    const retirados = ((listaAnterior && listaAnterior.items) || []).filter(function (it) { return !(normalizar(it.articulo) in idxNue); });
+    const subieron = cambios.filter(function (c) { return (c.pctUnit || 0) > 0.0005; }).length;
+    const bajaron = cambios.filter(function (c) { return (c.pctUnit || 0) < -0.0005; }).length;
+
+    // Alertas sobre la lista nueva
+    const sinCosto = [];
+    const margenBajo = [];
+    const packMasCaro = [];
+    const precioCero = [];
+    (itemsConCosto || []).forEach(function (it) {
+      if (!(it.precioUnitario > 0) || !(it.precioPack > 0)) { precioCero.push(it.articulo); return; }
+      if (it.precioPack > it.precioUnitario + 0.005) packMasCaro.push({ articulo: it.articulo, unit: it.precioUnitario, pack: it.precioPack });
+      if (!(it.costoUnitario > 0)) { sinCosto.push(it.articulo); return; }
+      const realU = (it.precioUnitario - it.costoUnitario) / it.precioUnitario;
+      const realP = (it.precioPack - it.costoUnitario) / it.precioPack;
+      const espU = it.pctGananciaEsperadoUnitario;
+      const espP = it.pctGananciaEsperadoPack;
+      const bajoU = espU !== null && espU !== undefined && realU < espU - 0.01;
+      const bajoP = espP !== null && espP !== undefined && realP < espP - 0.01;
+      if (bajoU || bajoP || realU < 0 || realP < 0) {
+        margenBajo.push({
+          articulo: it.articulo, costo: it.costoUnitario,
+          realUnit: realU, esperadoUnit: espU === undefined ? null : espU,
+          realPack: realP, esperadoPack: espP === undefined ? null : espP,
+          bajoCosto: realU < 0 || realP < 0,
+        });
+      }
+    });
+    margenBajo.sort(function (a, b) { return Math.min(a.realUnit, a.realPack) - Math.min(b.realUnit, b.realPack); });
+
+    return {
+      hayListaAnterior: !!(listaAnterior && listaAnterior.items && listaAnterior.items.length),
+      resumen: { total: itemsNuevos.length, iguales: iguales, cambiaron: cambios.length, subieron: subieron, bajaron: bajaron, nuevos: nuevos.length, retirados: retirados.length },
+      cambios: cambios, nuevos: nuevos, retirados: retirados,
+      alertas: { sinCosto: sinCosto, margenBajo: margenBajo, packMasCaro: packMasCaro, precioCero: precioCero },
+    };
+  }
+
   function leerArchivoExcel(file) {
     return new Promise(function (resolve, reject) {
       const lector = new FileReader();
@@ -390,6 +538,7 @@
         }
       }
 
+      const listaAnteriorParaInforme = listaActual ? JSON.parse(JSON.stringify(listaActual)) : null;
       const lista = {
         actualizado: new Date().toISOString(),
         origenArchivo: file.name + ' (hoja: ' + resultado.hojaUsada + ')',
@@ -408,8 +557,10 @@
       // Excel nuevo: así, un informe de un mes puntual siempre usa el
       // precio y el costo que realmente estaban vigentes en esa fecha.
       let resultadoCostos = null;
+      // Formato nuevo (hoja "Maestra"): costos y proveedor salen de ahí.
+      const maestra = parsearMaestra(workbook);
       try {
-        resultadoCostos = parsearHojaCostos(workbook);
+        resultadoCostos = maestra || parsearHojaCostos(workbook);
       } catch (errCostos) {
         console.warn('No se pudo leer la hoja de costos de este Excel:', errCostos);
       }
@@ -424,7 +575,9 @@
       // para TODOS si la hoja de costos no se pudo leer.
       const hojasExcluirCostos = [resultado.hojaUsada];
       if (resultadoCostos) hojasExcluirCostos.push(resultadoCostos.hojaUsada);
-      const costosProveedores = parsearCostosDesdeProveedores(workbook, hojasExcluirCostos);
+      // Con la hoja Maestra no hace falta el "plan B": las demás pestañas son
+      // de trabajo y no tienen el formato de costos por proveedor.
+      const costosProveedores = maestra ? {} : parsearCostosDesdeProveedores(workbook, hojasExcluirCostos);
       let costosDesdeProveedores = 0;
 
       const ahora = new Date().toISOString();
@@ -483,7 +636,18 @@
       // para usarlo después al generar la "lista de compras" de cualquier
       // presupuesto, sin tener que volver a tocar el Excel.
       const hojasExcluir = hojasExcluirCostos;
-      const mapaProveedores = parsearHojasProveedores(workbook, hojasExcluir);
+      let mapaProveedores;
+      if (maestra) {
+        // Proveedor de cada artículo = columna PROVEEDOR de la hoja Maestra.
+        mapaProveedores = {};
+        maestra.items.forEach(function (it) {
+          if (it.proveedor && !(normalizar(it.articulo) in mapaProveedores)) {
+            mapaProveedores[normalizar(it.articulo)] = it.proveedor;
+          }
+        });
+      } else {
+        mapaProveedores = parsearHojasProveedores(workbook, hojasExcluir);
+      }
 
       // Salvaguarda: si NINGÚN artículo de la lista quedó asignado a un
       // proveedor, el Excel tiene algo raro: no pisamos el mapa bueno que ya
@@ -495,8 +659,28 @@
         .map(function (it) { return it.articulo; })
         .filter(function (articulo) { return !(normalizar(articulo) in mapaProveedores); });
 
+      // Informe de cambios + alertas (contra la lista que estaba vigente).
+      // Se arma con los datos de costo de este mismo archivo.
+      const informe = armarInforme(listaAnteriorParaInforme, resultado.items, snapshotListaPrecios.items);
+
+      // Los artículos cargados a mano que ahora YA están en el Excel salen
+      // solos de la bandeja de pendientes.
+      const pendientesIncorporados = [];
+      if (typeof window.Store.obtenerPendientes === 'function') {
+        const clavesNuevas = {};
+        resultado.items.forEach(function (it) { clavesNuevas[window.Store.claveArticulo(it.articulo)] = true; });
+        window.Store.obtenerPendientes().forEach(function (p) {
+          if (clavesNuevas[p.clave || window.Store.claveArticulo(p.articulo)]) {
+            window.Store.eliminarPendiente(p.id);
+            pendientesIncorporados.push(p.articulo);
+          }
+        });
+      }
+
       return {
         lista: lista,
+        informe: informe,
+        pendientesIncorporados: pendientesIncorporados,
         filasIgnoradas: resultado.filasIgnoradas,
         snapshotCostos: snapshotListaPrecios,
         sinProveedor: sinProveedor,
@@ -534,6 +718,8 @@
   window.Pricelist = {
     parsearWorkbook: parsearWorkbook,
     parsearHojaCostos: parsearHojaCostos,
+    parsearMaestra: parsearMaestra,
+    armarInforme: armarInforme,
     parsearHojasProveedores: parsearHojasProveedores,
     parsearCostosDesdeProveedores: parsearCostosDesdeProveedores,
     leerArchivoExcel: leerArchivoExcel,

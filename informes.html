@@ -135,15 +135,43 @@
     </div>
 
     <div class="tarjeta tarjeta-ancha">
-      <h2>Evolución de costo y precio por artículo</h2>
-      <div class="campo campo-flex" style="max-width:420px;">
-        <label for="filtro-articulo-evolucion">Elegí un artículo</label>
-        <select id="filtro-articulo-evolucion"><option value="">— Seleccionar —</option></select>
+      <h2>Buscar un artículo: a qué precio lo vendimos y cuánto costó</h2>
+      <p class="texto-ayuda">
+        Escribí parte del nombre y elegí el artículo. Aparecen <strong>todos</strong>: los de la lista actual,
+        los que ya no están en la lista, los que cambiaron de nombre y los cargados a mano.
+        Esta búsqueda no depende de los filtros de mes y cliente de arriba.
+      </p>
+      <div class="buscador-wrap" style="max-width:560px;">
+        <input type="text" id="buscar-articulo" placeholder="Ej: cepillo manija, bobina toalla…" autocomplete="off" />
+        <ul id="resultados-articulo" class="resultados-busqueda"></ul>
       </div>
-      <div class="chart-wrap"><canvas id="chart-evolucion"></canvas></div>
+      <div id="articulo-detalle" style="display:none;">
+        <h3 id="articulo-titulo"></h3>
+        <div class="informe-resumen" id="articulo-resumen"></div>
+        <h3>Ventas en presupuestos</h3>
+        <div class="tabla-wrap">
+          <table id="tabla-articulo-ventas">
+            <thead><tr><th>Fecha</th><th>Presupuesto</th><th>Cliente</th><th>Cant.</th><th>Precio aplicado</th><th>Importe</th><th>Costo unit.</th><th>Ganancia</th><th>Margen</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h3>Lista y costo en cada carga del Excel</h3>
+        <div class="chart-wrap"><canvas id="chart-evolucion"></canvas></div>
+        <div class="tabla-wrap">
+          <table id="tabla-evolucion">
+            <thead><tr><th>Carga</th><th>Precio unidad</th><th>Precio pack x unidad</th><th>Costo unit.</th><th>Margen unit.</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="tarjeta tarjeta-ancha">
+      <h2>Revisar: artículos vendidos que no se pueden cruzar con la lista o con un costo</h2>
+      <p class="texto-ayuda" id="revisar-ayuda"></p>
       <div class="tabla-wrap">
-        <table id="tabla-evolucion">
-          <thead><tr><th>Mes</th><th>Costo unitario</th><th>Precio venta promedio</th><th>Margen</th></tr></thead>
+        <table id="tabla-revisar">
+          <thead><tr><th>Artículo vendido</th><th>Qué pasa</th><th>Cant.</th><th>Venta</th><th>Posible coincidencia en la lista</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>

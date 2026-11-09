@@ -500,3 +500,25 @@ td.vacio { text-align: center; color: var(--tinta-suave); padding: 24px 10px; fo
 .aviso-lista { padding: 6px 16px; font-size: 13px; }
 .aviso-lista-ok { background: #eef6ee; color: #2e6b34; }
 .aviso-lista-mal { background: #c62828; color: #fff; font-weight: 700; }
+
+
+/* ---------------------- Clientes / pendientes / informe ---------------------- */
+.badge-pend {
+  display: inline-block; min-width: 18px; padding: 1px 6px; margin-left: 4px;
+  border-radius: 999px; background: var(--ambar); color: #fff;
+  font-size: 0.72rem; font-weight: 700; text-align: center;
+}
+.manual-mas { border-top: 1px dashed var(--linea); padding-top: 8px; }
+.manual-mas summary { cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--teal-fuerte); }
+.check-fila { display: flex; gap: 8px; align-items: center; font-size: 0.85rem; margin: 4px 0 10px; }
+.alerta-margen { margin-top: 4px; font-size: 0.74rem; font-weight: 600; color: var(--rojo); }
+#tabla-clientes td, #tabla-pendientes td { vertical-align: middle; }
+.acciones-fila { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+.informe-resumen { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 14px; }
+.informe-dato { background: var(--bg); border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; color: var(--tinta-suave); }
+.informe-dato strong { display: block; font-size: 1.15rem; color: var(--teal-fuerte); }
+.informe-dato.alerta strong { color: var(--rojo); }
+.informe-bloque { margin: 10px 0; }
+.informe-bloque summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; padding: 4px 0; }
+.suba { color: var(--rojo); font-weight: 600; }
+.baja { color: var(--teal-fuerte); font-weight: 600; }

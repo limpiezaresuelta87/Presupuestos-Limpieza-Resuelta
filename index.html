@@ -24,7 +24,8 @@
   <nav class="tabs">
     <button class="tab-btn activo" data-tab="nuevo">Nuevo presupuesto</button>
     <button class="tab-btn" data-tab="historial">Historial</button>
-    <button class="tab-btn" data-tab="lista-precios">Lista de precios</button>
+    <button class="tab-btn" data-tab="clientes">Clientes</button>
+    <button class="tab-btn" data-tab="lista-precios">Lista de precios <span id="badge-pendientes" class="badge-pend" style="display:none;"></span></button>
     <button class="tab-btn" data-tab="configuracion">Configuración</button>
     <a class="tab-btn" href="informes.html">Informes</a>
   </nav>
@@ -117,6 +118,39 @@
             <label for="manual-precio">Precio unitario</label>
             <input type="number" id="manual-precio" min="0" step="0.01" value="" placeholder="0,00" inputmode="decimal" />
           </div>
+          <details class="manual-mas" style="flex: 1 0 100%;">
+            <summary>Más datos del artículo (opcional — sirven para incorporarlo a la lista de precios y al catálogo)</summary>
+            <p class="texto-ayuda" style="margin:8px 0;">
+              Si no tenés todos los datos, dejá en blanco lo que falte: alcanza con proveedor y precio de venta.
+              Si cargás costo y % de ganancia sin precio de venta, el precio se calcula solo (con tu regla de redondeo).
+            </p>
+            <div class="fila-config-presupuesto">
+              <div class="campo campo-chico">
+                <label for="manual-hoja">Hoja del catálogo</label>
+                <input type="number" id="manual-hoja" min="1" placeholder="Ej: 12" inputmode="numeric" />
+              </div>
+              <div class="campo campo-chico">
+                <label for="manual-costo">Costo unitario</label>
+                <input type="number" id="manual-costo" min="0" step="0.01" placeholder="0,00" inputmode="decimal" />
+              </div>
+              <div class="campo campo-chico">
+                <label for="manual-cantidad-pack">Cantidad por pack</label>
+                <input type="number" id="manual-cantidad-pack" min="1" placeholder="Ej: 12" inputmode="numeric" />
+              </div>
+              <div class="campo campo-chico">
+                <label for="manual-margen-unit">% ganancia unitario</label>
+                <input type="number" id="manual-margen-unit" min="0" max="99" step="0.1" placeholder="Ej: 25" inputmode="decimal" />
+              </div>
+              <div class="campo campo-chico">
+                <label for="manual-margen-pack">% ganancia pack</label>
+                <input type="number" id="manual-margen-pack" min="0" max="99" step="0.1" placeholder="Ej: 20" inputmode="decimal" />
+              </div>
+            </div>
+            <label class="check-fila">
+              <input type="checkbox" id="manual-incorporar" checked />
+              Guardarlo en "Pendientes" para incorporarlo después al Excel y al catálogo
+            </label>
+          </details>
           <div class="campo campo-chico">
             <button type="button" class="btn btn-primario" id="btn-agregar-manual">Agregar</button>
           </div>
@@ -264,6 +298,34 @@
     </div>
   </section>
 
+  <!-- ================= CLIENTES ================= -->
+  <section id="panel-clientes" class="tab-panel">
+    <div class="tarjeta tarjeta-ancha">
+      <h2>Clientes</h2>
+      <p class="texto-ayuda">
+        Esta es la base de clientes de la app: desde acá se agregan, se corrigen y se borran.
+        Borrar o cambiar el nombre de un cliente <strong>no modifica los presupuestos que ya hiciste</strong>:
+        siguen con el nombre que tenían.
+      </p>
+      <div class="fila-config-presupuesto">
+        <div class="campo campo-flex" style="margin-bottom:0;">
+          <label for="buscador-clientes">Buscar cliente</label>
+          <input type="text" id="buscador-clientes" placeholder="Escribí parte del nombre o el CUIT…" autocomplete="off" />
+        </div>
+        <div class="campo" style="margin-bottom:0;">
+          <button type="button" class="btn btn-primario" id="btn-nuevo-cliente">+ Nuevo cliente</button>
+        </div>
+      </div>
+      <p class="texto-ayuda" id="clientes-contador" style="margin-top:12px;"></p>
+      <div class="tabla-wrap">
+        <table id="tabla-clientes">
+          <thead><tr><th>Cliente</th><th>CUIT</th><th>Contacto</th><th>Presupuestos</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- ================= LISTA DE PRECIOS ================= -->
   <section id="panel-lista-precios" class="tab-panel">
     <div class="tarjeta tarjeta-ancha">
@@ -277,11 +339,22 @@
         Historial de costos (para Informes): sin datos todavía.
       </p>
 
+      <h3>Lista de precios para clientes (PDF)</h3>
+      <p class="texto-ayuda">
+        Se arma sola con la lista vigente, ordenada por hoja del catálogo y por el orden del Excel.
+        Cada vez que subas un Excel nuevo, el PDF sale actualizado.
+      </p>
+      <div class="acciones-presupuesto" style="justify-content:flex-start;">
+        <button class="btn btn-secundario" id="btn-lp-pdf-preview">Vista previa</button>
+        <button class="btn btn-primario" id="btn-lp-pdf-descargar">Descargar PDF</button>
+      </div>
+
       <h3>Actualizar desde Excel</h3>
       <p class="texto-ayuda">
-        Subí la última versión de tu Excel de precios. La app lee la hoja principal de venta
-        (columnas Producto, Precio Unitario, Precio Pack y Cantidad de Pack), la guarda en este
-        navegador y la usa para todo presupuesto nuevo. <strong>El Excel original nunca se modifica.</strong>
+        Subí la última versión de tu Excel (la lista maestra). La app lee la hoja <strong>Lista Clientes</strong>
+        (hoja, artículo, precio unidad, precio pack y cantidad de pack) y, de la hoja <strong>Maestra</strong>,
+        el proveedor y el costo de cada artículo. Después te muestra qué cambió respecto de la lista anterior.
+        <strong>El Excel original nunca se modifica.</strong>
       </p>
       <div id="lp-dropzone" class="dropzone">
         <p>Arrastrá el archivo .xlsx acá, o tocá para elegirlo</p>
@@ -289,6 +362,29 @@
         <input type="file" id="lp-archivo" accept=".xlsx,.xls" hidden />
       </div>
       <p id="lp-estado" class="texto-estado"></p>
+    </div>
+
+    <div class="tarjeta tarjeta-ancha" id="lp-informe-card" style="display:none;">
+      <h2>Qué cambió con esta carga</h2>
+      <div id="lp-informe"></div>
+    </div>
+
+    <div class="tarjeta tarjeta-ancha" id="lp-pendientes-card">
+      <h2>Pendientes de incorporar al Excel</h2>
+      <p class="texto-ayuda">
+        Artículos que cargaste a mano en un presupuesto y todavía no están en la lista de precios.
+        Descargá la planilla, pegala en tu Excel (hoja Maestra) y subí el Excel actualizado:
+        los que ya estén en la lista salen solos de esta bandeja.
+      </p>
+      <div class="tabla-wrap">
+        <table id="tabla-pendientes">
+          <thead><tr><th>Artículo</th><th>Hoja</th><th>Proveedor</th><th>Cant. pack</th><th>Costo</th><th>% unit.</th><th>% pack</th><th>Precio venta</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="acciones-presupuesto" style="justify-content:flex-start;">
+        <button class="btn btn-secundario" id="btn-pendientes-excel">Descargar planilla para el Excel</button>
+      </div>
     </div>
   </section>
 
@@ -386,6 +482,34 @@
   </section>
 
 </main>
+
+<!-- Alta / edición de cliente -->
+<div id="modal-cliente" class="modal-fondo" style="display:none;">
+  <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="cli-titulo">
+    <h3 id="cli-titulo">Cliente</h3>
+    <div class="campo">
+      <label for="cli-nombre">Nombre / razón social</label>
+      <input type="text" id="cli-nombre" autocomplete="off" />
+    </div>
+    <div class="campo">
+      <label for="cli-cuit">CUIT / DNI (opcional)</label>
+      <input type="text" id="cli-cuit" autocomplete="off" />
+    </div>
+    <div class="campo">
+      <label for="cli-contacto">Teléfono, email o dirección (opcional)</label>
+      <input type="text" id="cli-contacto" autocomplete="off" />
+    </div>
+    <div class="campo">
+      <label for="cli-notas">Notas (opcional)</label>
+      <input type="text" id="cli-notas" autocomplete="off" />
+    </div>
+    <p id="cli-error" class="texto-estado" style="color:var(--rojo);"></p>
+    <div class="modal-botones">
+      <button type="button" class="btn btn-primario" id="btn-cli-guardar">Guardar</button>
+      <button type="button" class="btn" id="btn-cli-cancelar">Cancelar</button>
+    </div>
+  </div>
+</div>
 
 <!-- Revisión ortográfica antes de guardar -->
 <div id="modal-ortografia" class="modal-fondo" style="display:none;">

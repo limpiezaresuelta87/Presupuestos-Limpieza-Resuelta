@@ -34,6 +34,8 @@
   const COL_COSTOS = db.collection('costosHistoricos');
   const DOC_CLIENTES = db.collection('clientes').doc('lista');
   const DOC_PROVEEDORES = db.collection('proveedores').doc('mapa');
+  // Artículos cargados a mano en un presupuesto que hay que incorporar al Excel/catálogo.
+  const COL_PENDIENTES = db.collection('pendientesIncorporar');
 
   const SCHEMA_VERSION_ACTUAL = 3;
 
@@ -136,11 +138,14 @@
     costosHistoricos: [],
     clientes: [],
     contactosClientes: {}, // { nombreCliente: contacto }
+    datosClientes: {},     // { nombreCliente: { cuit, notas } }
+    eliminadosClientes: [], // nombres borrados/renombrados a propósito (la autorreparación no los vuelve a agregar)
+    pendientes: [],        // artículos manuales a incorporar al Excel
     proveedores: {}, // { articuloNormalizado: nombreProveedor }
   };
 
   let listenersIniciados = false;
-  const fuentesListas = { config: false, historial: false, listaPrecios: false, costos: false, clientes: false, proveedores: false };
+  const fuentesListas = { config: false, historial: false, listaPrecios: false, costos: false, clientes: false, proveedores: false, pendientes: false };
   let resolversListo = [];
 
   function chequearListo() {
@@ -220,6 +225,8 @@
       const nombres = Array.isArray(datos.nombres) ? datos.nombres : [];
       cache.clientes = nombres.slice().sort(function (a, b) { return a.localeCompare(b, 'es'); });
       cache.contactosClientes = datos.contactos && typeof datos.contactos === 'object' ? datos.contactos : {};
+      cache.datosClientes = datos.datos && typeof datos.datos === 'object' ? datos.datos : {};
+      cache.eliminadosClientes = Array.isArray(datos.eliminados) ? datos.eliminados : [];
       fuentesListas.clientes = true;
       chequearListo();
     }, function (err) {
@@ -237,6 +244,16 @@
       fuentesListas.proveedores = true;
       chequearListo();
     });
+
+    COL_PENDIENTES.onSnapshot(function (snap) {
+      cache.pendientes = snap.docs.map(function (d) { return d.data(); });
+      fuentesListas.pendientes = true;
+      chequearListo();
+    }, function (err) {
+      console.error('[store] Error escuchando pendientes:', err);
+      fuentesListas.pendientes = true;
+      chequearListo();
+    });
   }
 
   /** Escritura en bloque de varios documentos, respetando el límite de 500 por batch de Firestore. */
@@ -252,6 +269,29 @@
       lotes.push(batch.commit());
     }
     return Promise.all(lotes);
+  }
+
+  /** Nombre de cliente normalizado: MAYÚSCULA y sin espacios de más. */
+  function normalizarNombreClienteStore(nombre) {
+    return String(nombre || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  }
+
+  /** Clave estable (sin tildes ni símbolos) para detectar el mismo artículo escrito distinto. */
+  function claveArticulo(nombre) {
+    return String(nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  }
+
+  /** Escribe en Firestore el documento completo de clientes (nombres + contactos + fichas + eliminados). */
+  function guardarDocClientes() {
+    return DOC_CLIENTES.set({
+      nombres: cache.clientes,
+      contactos: cache.contactosClientes,
+      datos: cache.datosClientes,
+      eliminados: cache.eliminadosClientes,
+    }).catch(function (err) {
+      console.error('[store] No se pudo guardar la lista de clientes:', err);
+    });
   }
 
   const Store = {
@@ -576,9 +616,9 @@
       if (!limpio) return null;
       if (cache.clientes.indexOf(limpio) === -1) {
         cache.clientes = cache.clientes.concat([limpio]).sort(function (a, b) { return a.localeCompare(b, 'es'); });
-        DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
-          console.error('[store] No se pudo guardar el cliente nuevo:', err);
-        });
+        // Si antes se había borrado, deja de estar en la lista de "eliminados".
+        cache.eliminadosClientes = cache.eliminadosClientes.filter(function (n) { return n !== limpio; });
+        guardarDocClientes();
       }
       return limpio;
     },
@@ -592,17 +632,18 @@
       if (!confirmado.clientes) return 0;
       const enLista = {};
       cache.clientes.forEach(function (n) { enLista[n] = true; });
+      const eliminados = {};
+      cache.eliminadosClientes.forEach(function (n) { eliminados[n] = true; });
       const faltantes = {};
       cache.historial.forEach(function (p) {
         const n = p && p.cliente && String(p.cliente.nombre || '').trim().toUpperCase().replace(/\s+/g, ' ');
-        if (n && !enLista[n]) faltantes[n] = true;
+        // Los clientes que se borraron o renombraron a propósito NO se recuperan.
+        if (n && !enLista[n] && !eliminados[n]) faltantes[n] = true;
       });
       const nombresFaltantes = Object.keys(faltantes);
       if (nombresFaltantes.length === 0) return 0;
       cache.clientes = cache.clientes.concat(nombresFaltantes).sort(function (a, b) { return a.localeCompare(b, 'es'); });
-      DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
-        console.error('[store] No se pudo reparar la lista de clientes:', err);
-      });
+      guardarDocClientes();
       return nombresFaltantes.length;
     },
 
@@ -642,9 +683,7 @@
     guardarContactoCliente: function (nombre, contacto) {
       if (!nombre) return false;
       cache.contactosClientes = Object.assign({}, cache.contactosClientes, { [nombre]: String(contacto || '').trim() });
-      DOC_CLIENTES.set({ nombres: cache.clientes, contactos: cache.contactosClientes }).catch(function (err) {
-        console.error('[store] No se pudo guardar el contacto del cliente:', err);
-      });
+      guardarDocClientes();
       return true;
     },
 
@@ -666,11 +705,126 @@
       const contactos = Object.assign({}, contactosBackup, cache.contactosClientes);
       cache.clientes = nombres;
       cache.contactosClientes = contactos;
-      DOC_CLIENTES.set({ nombres: nombres, contactos: contactos }).catch(function (err) {
-        console.error('[store] No se pudo restaurar la lista de clientes:', err);
+      // Fichas (CUIT, notas) del backup: suma las que faltan, sin pisar las actuales.
+      const datosBackup = (datos && datos.datos && typeof datos.datos === 'object') ? datos.datos : {};
+      cache.datosClientes = Object.assign({}, datosBackup, cache.datosClientes);
+      cache.eliminadosClientes = cache.eliminadosClientes.filter(function (n) { return nombres.indexOf(n) === -1; });
+      guardarDocClientes();
+      return true;
+    },
+
+    // -------------------------------------------------------------------
+    // Gestión de clientes (pantalla "Clientes")
+    // -------------------------------------------------------------------
+    /** Ficha de un cliente: { contacto, cuit, notas } (vacíos si no tiene). */
+    obtenerDatosCliente: function (nombre) {
+      const d = cache.datosClientes[nombre] || {};
+      return { contacto: cache.contactosClientes[nombre] || '', cuit: d.cuit || '', notas: d.notas || '' };
+    },
+
+    /** Todas las fichas, para el backup completo. */
+    obtenerDatosClientes: function () {
+      return clonar(cache.datosClientes);
+    },
+
+    /** Cuántos presupuestos tiene un cliente: { activos, enPapelera }. */
+    contarPresupuestosDeCliente: function (nombre) {
+      const n = normalizarNombreClienteStore(nombre);
+      let activos = 0;
+      let enPapelera = 0;
+      cache.historial.forEach(function (p) {
+        if (normalizarNombreClienteStore(p && p.cliente && p.cliente.nombre) !== n) return;
+        if (p.enPapelera) enPapelera++; else activos++;
+      });
+      return { activos: activos, enPapelera: enPapelera };
+    },
+
+    /**
+     * Crea o edita un cliente. `nombreOriginal` = null para uno nuevo.
+     * Si cambia el nombre, los presupuestos ya emitidos conservan el que
+     * tenían (no se tocan). Devuelve { ok, nombre } o { ok:false, error }.
+     */
+    guardarCliente: function (nombreOriginal, ficha) {
+      if (!confirmado.clientes) {
+        return { ok: false, error: 'Todavía no se confirmó la lista de clientes con el servidor (¿sin conexión?). Probá de nuevo en unos segundos.' };
+      }
+      const nuevo = normalizarNombreClienteStore(ficha && ficha.nombre);
+      if (!nuevo) return { ok: false, error: 'Escribí el nombre del cliente.' };
+      const original = nombreOriginal ? normalizarNombreClienteStore(nombreOriginal) : null;
+      if (nuevo !== original && cache.clientes.indexOf(nuevo) !== -1) {
+        return { ok: false, error: 'Ya existe un cliente con ese nombre.' };
+      }
+      let nombres = cache.clientes.slice();
+      const contactos = Object.assign({}, cache.contactosClientes);
+      const datos = Object.assign({}, cache.datosClientes);
+      let eliminados = cache.eliminadosClientes.filter(function (n) { return n !== nuevo; });
+      if (original && original !== nuevo) {
+        nombres = nombres.filter(function (n) { return n !== original; });
+        delete contactos[original];
+        delete datos[original];
+        if (eliminados.indexOf(original) === -1) eliminados.push(original);
+      }
+      if (nombres.indexOf(nuevo) === -1) nombres.push(nuevo);
+      const contacto = String(ficha.contacto || '').trim();
+      if (contacto) contactos[nuevo] = contacto; else delete contactos[nuevo];
+      const cuit = String(ficha.cuit || '').trim();
+      const notas = String(ficha.notas || '').trim();
+      if (cuit || notas) datos[nuevo] = { cuit: cuit, notas: notas }; else delete datos[nuevo];
+      cache.clientes = nombres.sort(function (a, b) { return a.localeCompare(b, 'es'); });
+      cache.contactosClientes = contactos;
+      cache.datosClientes = datos;
+      cache.eliminadosClientes = eliminados;
+      guardarDocClientes();
+      return { ok: true, nombre: nuevo };
+    },
+
+    /** Saca un cliente de la lista. Sus presupuestos del historial NO se tocan. */
+    eliminarCliente: function (nombre) {
+      if (!confirmado.clientes) {
+        return { ok: false, error: 'Todavía no se confirmó la lista de clientes con el servidor (¿sin conexión?).' };
+      }
+      const n = normalizarNombreClienteStore(nombre);
+      cache.clientes = cache.clientes.filter(function (c) { return c !== n; });
+      const contactos = Object.assign({}, cache.contactosClientes);
+      const datos = Object.assign({}, cache.datosClientes);
+      delete contactos[n];
+      delete datos[n];
+      cache.contactosClientes = contactos;
+      cache.datosClientes = datos;
+      if (cache.eliminadosClientes.indexOf(n) === -1) cache.eliminadosClientes = cache.eliminadosClientes.concat([n]);
+      guardarDocClientes();
+      return { ok: true };
+    },
+
+    // -------------------------------------------------------------------
+    // Pendientes de incorporar al Excel (artículos cargados a mano)
+    // -------------------------------------------------------------------
+    obtenerPendientes: function () {
+      return clonar(cache.pendientes).sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+    },
+
+    /** Agrega (o actualiza, si ya estaba el mismo artículo) un pendiente. */
+    agregarPendiente: function (pendiente) {
+      const clave = claveArticulo(pendiente.articulo);
+      if (!clave) return false;
+      const id = ('p_' + clave).replace(/ /g, '_').slice(0, 140);
+      const registro = Object.assign({}, pendiente, { id: id, clave: clave, fecha: new Date().toISOString() });
+      cache.pendientes = cache.pendientes.filter(function (p) { return p.id !== id; }).concat([registro]);
+      COL_PENDIENTES.doc(id).set(registro).catch(function (err) {
+        console.error('[store] No se pudo guardar el pendiente:', err);
       });
       return true;
     },
+
+    eliminarPendiente: function (id) {
+      cache.pendientes = cache.pendientes.filter(function (p) { return p.id !== id; });
+      COL_PENDIENTES.doc(id).delete().catch(function (err) {
+        console.error('[store] No se pudo borrar el pendiente:', err);
+      });
+      return true;
+    },
+
+    claveArticulo: claveArticulo,
 
     /** Reemplaza TODO el historial de precios/costos de una vez (usado al restaurar un backup). */
     restaurarCostosHistoricos: function (snapshots) {
