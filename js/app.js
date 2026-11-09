@@ -676,6 +676,34 @@
       if (!visible) { actualizarSugerenciasProveedor(); $('#manual-nombre').focus(); }
     });
 
+    // Cálculo en vivo: con costo y % de ganancia, el precio de venta se completa solo
+    // (aunque el artículo sea eventual y no se guarde en Pendientes). Si Caro escribe
+    // un precio a mano, se respeta y deja de pisarse.
+    const campoPrecio = $('#manual-precio');
+    const avisoCalculo = $('#manual-calculo');
+    campoPrecio.addEventListener('input', function () { campoPrecio.dataset.auto = ''; recalcularPrecioManual(); });
+    function recalcularPrecioManual() {
+      const costo = Number($('#manual-costo').value);
+      const mu = Number($('#manual-margen-unit').value);
+      const mp = Number($('#manual-margen-pack').value);
+      const cp = Math.floor(Number($('#manual-cantidad-pack').value));
+      const pUnit = Quote.precioSegunMargen(costo, mu);
+      const pPack = (cp > 0) ? Quote.precioSegunMargen(costo, mp) : 0;
+      if (pUnit > 0 && (campoPrecio.value === '' || campoPrecio.dataset.auto === '1')) {
+        campoPrecio.value = String(pUnit); campoPrecio.dataset.auto = '1';
+      } else if (!(pUnit > 0) && campoPrecio.dataset.auto === '1') {
+        campoPrecio.value = ''; campoPrecio.dataset.auto = '';
+      }
+      const partes = [];
+      if (pUnit > 0) partes.push('Precio de venta unitario calculado: ' + Quote.formatoMoneda(pUnit));
+      if (pPack > 0) partes.push('Precio por unidad desde ' + cp + ' u. (pack): ' + Quote.formatoMoneda(pPack));
+      avisoCalculo.textContent = partes.join('  ·  ');
+      avisoCalculo.style.display = partes.length ? 'block' : 'none';
+    }
+    ['manual-costo', 'manual-margen-unit', 'manual-margen-pack', 'manual-cantidad-pack'].forEach(function (id) {
+      $('#' + id).addEventListener('input', recalcularPrecioManual);
+    });
+
     $('#btn-agregar-manual').addEventListener('click', function () {
       const nombre = $('#manual-nombre').value.trim().toUpperCase();
       if (!nombre) {
@@ -740,6 +768,7 @@
         $('#' + id).value = '';
       });
       $('#manual-incorporar').checked = true;
+      campoPrecio.dataset.auto = ''; avisoCalculo.style.display = 'none';
       const detalles = $('.manual-mas');
       if (detalles) detalles.open = false;
       form.style.display = 'none';
