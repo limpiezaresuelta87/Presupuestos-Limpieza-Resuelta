@@ -697,10 +697,20 @@
       const partes = [];
       if (pUnit > 0) partes.push('Precio de venta unitario calculado: ' + Quote.formatoMoneda(pUnit));
       if (pPack > 0) partes.push('Precio por unidad desde ' + cp + ' u. (pack): ' + Quote.formatoMoneda(pPack));
+      // Qué precio se va a aplicar con la cantidad cargada (misma función que usa "Agregar").
+      const cant = Number($('#manual-cantidad').value);
+      if (cant >= 1 && Number(campoPrecio.value) > 0) {
+        const l = Quote.crearLineaManual('x', cant, campoPrecio.value, '', {
+          costoUnitario: $('#manual-costo').value, cantidadPack: $('#manual-cantidad-pack').value,
+          margenUnit: $('#manual-margen-unit').value, margenPack: $('#manual-margen-pack').value,
+        });
+        partes.push('Con ' + cant + ' u. se aplica el precio ' + (l.tipoPrecio === 'pack' ? 'de PACK' : 'unitario') +
+          ': ' + Quote.formatoMoneda(l.precioUnitarioAplicado) + ' c/u → total ' + Quote.formatoMoneda(l.importe));
+      }
       avisoCalculo.textContent = partes.join('  ·  ');
       avisoCalculo.style.display = partes.length ? 'block' : 'none';
     }
-    ['manual-costo', 'manual-margen-unit', 'manual-margen-pack', 'manual-cantidad-pack'].forEach(function (id) {
+    ['manual-costo', 'manual-margen-unit', 'manual-margen-pack', 'manual-cantidad-pack', 'manual-cantidad'].forEach(function (id) {
       $('#' + id).addEventListener('input', recalcularPrecioManual);
     });
 
